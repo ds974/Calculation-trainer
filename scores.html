@@ -1,0 +1,26 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Scores</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h2>🏆 Tableau des Scores</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Prénom</th>
+                <th>Score</th>
+                <th>Temps (s)</th>
+                <th>Tables utilisées</th>
+            </tr>
+        </thead>
+        <tbody id="scoreTable"></tbody>
+    </table>
+    <button onclick="window.location.href='index.html'">🏠 Retour à l'accueil</button>
+    <script src="displayScores.js"></script>
+<script>window.onload = () => displayScoreTable("scoreTable");</script>
+</body>
+</html>

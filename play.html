@@ -1,0 +1,41 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Mission</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="game">
+        <div id="question" class="question-display"></div>
+        <input type="number" id="answer" autocomplete="off">
+        <div id="feedback"></div>
+        <div id="timer">⏱️ <span id="time">5.0</span>s</div>
+    </div>
+    <div class="result" style="display:none;">
+        <h2>Résultat</h2>
+        <p id="scoreDisplay"></p>
+        <h3>Détails des questions :</h3>
+        <table id="feedbackTable">
+            <thead><tr><th>Calcul</th><th>Bonne réponse</th><th>Temps (s)</th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <label for="name">Votre prénom :</label>
+        <input type="text" id="name">
+        <br>
+        <button onclick="saveAndRestart()">🔁 Nouvelle Partie</button>
+        <button onclick="saveAndReturn()">🏠 Retour</button>
+        <h3>Top 20 Scores</h3>
+        <table>
+            <thead>
+                <tr><th>Prénom</th><th>Score</th><th>Temps (s)</th><th>Tables utilisées</th></tr>
+            </thead>
+            <tbody id="scoreTable"></tbody>
+        </table>
+    </div>
+    <script src="script.js"></script>
+<script src="displayScores.js"></script>
+<script>window.onload = () => displayScoreTable("scoreTable");</script>
+</body>
+</html>
