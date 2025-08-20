@@ -130,7 +130,7 @@ function endGame() {
     });
 
     window.finalScore = { score, time: totalTime, tables: usedTables };
-    loadScoreTable();
+    displayScoreTable('scoreTable');
 }
 
 function saveAndRestart() {
@@ -150,17 +150,5 @@ function saveScore() {
     let scores = JSON.parse(localStorage.getItem('scores') || '[]');
     scores.push(entry);
     localStorage.setItem('scores', JSON.stringify(scores));
-    loadScoreTable();
-}
-
-function loadScoreTable() {
-    const scores = JSON.parse(localStorage.getItem('scores') || '[]');
-    scores.sort((a, b) => b.score - a.score || a.time - b.time);
-    const top20 = scores.slice(0, 20);
-    const tbody = document.getElementById('scoreTable');
-    if (!tbody) return;
-    tbody.innerHTML = "";
-    top20.forEach(e => {
-        tbody.innerHTML += `<tr><td>${e.name}</td><td>${e.score}</td><td>${e.time}</td><td>${(e.tables || []).join(', ')}</td><td>${e.time}</td></tr>`;
-    });
+    displayScoreTable('scoreTable');
 }

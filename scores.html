@@ -21,6 +21,10 @@
     </table>
     <button onclick="window.location.href='index.html'">🏠 Retour à l'accueil</button>
     <script src="displayScores.js"></script>
-<script>window.onload = () => displayScoreTable("scoreTable");</script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            displayScoreTable('scoreTable');
+        });
+    </script>
 </body>
 </html>

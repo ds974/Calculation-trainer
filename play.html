@@ -35,7 +35,11 @@
         </table>
     </div>
     <script src="script.js"></script>
-<script src="displayScores.js"></script>
-<script>window.onload = () => displayScoreTable("scoreTable");</script>
+    <script src="displayScores.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            displayScoreTable('scoreTable');
+        });
+    </script>
 </body>
 </html>
