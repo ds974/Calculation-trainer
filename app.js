@@ -1,18 +1,42 @@
 "use strict";
 
-// Les clés v10 sont volontairement conservées pour garder les paramètres
-// et les scores déjà enregistrés lors du passage à la v10b.
+// Les clés v10 et v11 sont volontairement conservées pour garder les paramètres
+// et les scores déjà enregistrés lors du passage à la v10b puis à la v11.
+// Les clés v11 supportent les modes Multiplications et Additions.
 const STORAGE = {
-  config: "multiplicationTrainer.config.v10",
-  scores: "multiplicationTrainer.scores.v10",
+  config: "multiplicationTrainer.config.v11",
+  scores: "multiplicationTrainer.scores.v11",
+  legacyConfig: "multiplicationTrainer.config.v10",
+  legacyScores: "multiplicationTrainer.scores.v10",
   legacyTables: "tables",
   legacyTime: "timeLimit",
-  legacyScores: "scores"
+  oldLegacyScores: "scores"
 };
 
+// MODES centralise les opérations : le symbole d'affichage, le libellé et le calcul.
+// Toute nouvelle opération (soustraction, division…) s'ajoutera ici.
+const MODES = {
+  mult: {
+    key: "mult",
+    label: "Multiplications",
+    symbol: "×",
+    compute: (a, b) => a * b
+  },
+  add: {
+    key: "add",
+    label: "Additions",
+    symbol: "+",
+    compute: (a, b) => a + b
+  }
+};
+
+const QUESTION_COUNT = 10;
+
 const DEFAULT_CONFIG = {
-  tables: [1,2,3,4,5,6,7,8,9,10],
-  timePerQuestion: 5
+  mode: "mult",
+  timePerQuestion: 5,
+  mult: { tables: [1,2,3,4,5,6,7,8,9,10] },
+  add: { min: 1, max: 20 }
 };
 
 const state = {
@@ -33,17 +57,25 @@ const state = {
 document.addEventListener("DOMContentLoaded", init);
 
 function init() {
-  migrateLegacyScoresIfPossible();
+  migrateScoresIfNeeded();
   buildConfigControls();
   bindActions();
   bindAnswerInput();
   bindNumericKeypad();
   resetRocket();
+  updateHomeTitle();
   showScreen("homeScreen");
 }
 
 function bindActions() {
   document.addEventListener("click", (event) => {
+    // Changement d'onglet du classement (indépendant des boutons d'action).
+    const modeTab = event.target.closest("[data-leaderboard-mode]");
+    if (modeTab) {
+      switchLeaderboardMode(modeTab.dataset.leaderboardMode);
+      return;
+    }
+
     const button = event.target.closest("[data-action]");
     if (!button) return;
 
@@ -57,6 +89,25 @@ function bindActions() {
   });
 }
 
+// --- Opérations centralisées ---
+// Ces fonctions sont les SEULES à connaître le calcul et le symbole d'une opération.
+// Le mode est attaché à chaque question, garantissant la cohérence même si l'utilisateur
+// change de mode en cours de partie.
+function computeAnswer(q) {
+  const mode = MODES[q.mode] || MODES[DEFAULT_CONFIG.mode];
+  return mode.compute(q.a, q.b);
+}
+
+function operatorSymbol(modeKey = state.config.mode) {
+  const mode = MODES[modeKey] || MODES[DEFAULT_CONFIG.mode];
+  return mode.symbol;
+}
+
+function modeLabel(modeKey = state.config.mode) {
+  const mode = MODES[modeKey] || MODES[DEFAULT_CONFIG.mode];
+  return mode.label;
+}
+
 function bindAnswerInput() {
   const answer = document.getElementById("answer");
 
@@ -66,7 +117,7 @@ function bindAnswerInput() {
     if (value === "") return;
 
     const q = state.questions[state.currentIndex];
-    if (Number(value) === q.a * q.b) {
+    if (Number(value) === computeAnswer(q)) {
       finishQuestion(true, Number(value));
     }
   });
@@ -80,7 +131,7 @@ function bindAnswerInput() {
       if (value === "") return;
       const q = state.questions[state.currentIndex];
       const numericValue = Number(value);
-      if (numericValue !== q.a * q.b) finishQuestion(false, numericValue);
+      if (numericValue !== computeAnswer(q)) finishQuestion(false, numericValue);
       return;
     }
 
@@ -129,11 +180,29 @@ function showConfig() {
 }
 
 function showLeaderboard() {
-  renderLeaderboard("leaderboardBody", "leaderboardEmpty");
+  switchLeaderboardMode(state.config.mode);
   showScreen("leaderboardScreen");
 }
 
 function buildConfigControls() {
+  // Sélecteur de mode (Multiplications / Additions)
+  document.querySelectorAll("[data-mode-option]").forEach((radio) => {
+    radio.checked = radio.value === state.config.mode;
+    radio.addEventListener("change", handleModeChange);
+  });
+
+  buildTableCheckboxes();
+  buildRangeInputs();
+
+  const timeLimit = document.getElementById("timeLimit");
+  timeLimit.value = String(state.config.timePerQuestion);
+  timeLimit.addEventListener("change", handleTimeChange);
+  timeLimit.addEventListener("blur", handleTimeChange);
+
+  applyConfigVisibility();
+}
+
+function buildTableCheckboxes() {
   const container = document.getElementById("tableCheckboxes");
   container.innerHTML = "";
 
@@ -144,7 +213,7 @@ function buildConfigControls() {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = String(table);
-    checkbox.checked = state.config.tables.includes(table);
+    checkbox.checked = state.config.mult.tables.includes(table);
     checkbox.addEventListener("change", handleTableChange);
 
     const text = document.createElement("span");
@@ -153,34 +222,86 @@ function buildConfigControls() {
     label.append(checkbox, text);
     container.appendChild(label);
   }
+}
 
-  const timeLimit = document.getElementById("timeLimit");
-  timeLimit.value = String(state.config.timePerQuestion);
-  timeLimit.addEventListener("change", handleTimeChange);
-  timeLimit.addEventListener("blur", handleTimeChange);
+function buildRangeInputs() {
+  const minInput = document.getElementById("addMin");
+  const maxInput = document.getElementById("addMax");
+  if (!minInput || !maxInput) return;
+
+  minInput.value = String(state.config.add.min);
+  maxInput.value = String(state.config.add.max);
+  minInput.addEventListener("change", handleRangeChange);
+  minInput.addEventListener("blur", handleRangeChange);
+  maxInput.addEventListener("change", handleRangeChange);
+  maxInput.addEventListener("blur", handleRangeChange);
 }
 
 function syncConfigControls() {
-  document.querySelectorAll("#tableCheckboxes input[type='checkbox']").forEach((checkbox) => {
-    checkbox.checked = state.config.tables.includes(Number(checkbox.value));
+  document.querySelectorAll("[data-mode-option]").forEach((radio) => {
+    radio.checked = radio.value === state.config.mode;
   });
+  document.querySelectorAll("#tableCheckboxes input[type='checkbox']").forEach((checkbox) => {
+    checkbox.checked = state.config.mult.tables.includes(Number(checkbox.value));
+  });
+  const minInput = document.getElementById("addMin");
+  const maxInput = document.getElementById("addMax");
+  if (minInput) minInput.value = String(state.config.add.min);
+  if (maxInput) maxInput.value = String(state.config.add.max);
   document.getElementById("timeLimit").value = String(state.config.timePerQuestion);
+  applyConfigVisibility();
 }
 
-function handleTableChange(event) {
+function applyConfigVisibility() {
+  const isMult = state.config.mode === "mult";
+  const multBlock = document.getElementById("multConfigBlock");
+  const addBlock = document.getElementById("addConfigBlock");
+  if (multBlock) multBlock.hidden = !isMult;
+  if (addBlock) addBlock.hidden = isMult;
+}
+
+function handleModeChange(event) {
+  state.config.mode = event.target.value;
+  saveConfig();
+  syncConfigControls();
+  updateHomeTitle();
+}
+
+// Met à jour le titre de l'accueil et la description selon le mode choisi.
+function updateHomeTitle() {
+  const title = document.getElementById("homeTitle");
+  const subtitle = document.getElementById("homeSubtitle");
+  if (title) title.textContent = `Mission ${modeLabel()}`;
+  if (subtitle) {
+    subtitle.textContent = state.config.mode === "add"
+      ? "10 additions, un chrono et une fusée à construire."
+      : "10 calculs, un chrono et une fusée à construire.";
+  }
+}
+
+function handleTableChange() {
   const checked = [...document.querySelectorAll("#tableCheckboxes input:checked")]
     .map((input) => Number(input.value))
     .sort((a, b) => a - b);
 
-  const warning = document.getElementById("tableWarning");
-  if (checked.length * checked.length < 10) {
-    event.target.checked = true;
-    warning.textContent = "Sélectionnez au moins 4 tables pour obtenir 10 calculs différents.";
-    return;
-  }
+  state.config.mult.tables = checked;
+  saveConfig();
+}
 
-  warning.textContent = "";
-  state.config.tables = checked;
+function handleRangeChange() {
+  const minInput = document.getElementById("addMin");
+  const maxInput = document.getElementById("addMax");
+  let min = Number(minInput.value);
+  let max = Number(maxInput.value);
+  if (!Number.isInteger(min)) min = DEFAULT_CONFIG.add.min;
+  if (!Number.isInteger(max)) max = DEFAULT_CONFIG.add.max;
+  min = Math.min(99, Math.max(1, min));
+  max = Math.min(99, Math.max(1, max));
+  if (min > max) [min, max] = [max, min];
+  minInput.value = String(min);
+  maxInput.value = String(max);
+  state.config.add.min = min;
+  state.config.add.max = max;
   saveConfig();
 }
 
@@ -196,12 +317,18 @@ function handleTimeChange() {
 
 function startMission() {
   clearQuestionTimers();
-  if (state.config.tables.length * state.config.tables.length < 10) {
+  const generationError = validateQuestionPool();
+  if (generationError) {
+    // Le message s'affiche dans la zone d'avertissement des paramètres.
+    const warning = document.getElementById("tableWarning");
+    if (warning) {
+      warning.textContent = generationError;
+      warning.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
     showScreen("configScreen");
-    document.getElementById("tableWarning").textContent = "Sélectionnez au moins 4 tables pour obtenir 10 calculs différents.";
     return;
   }
-  state.questions = generateUniqueQuestions(state.config.tables);
+  state.questions = generateUniqueQuestions();
   state.currentIndex = 0;
   state.score = 0;
   state.results = [];
@@ -217,21 +344,68 @@ function startMission() {
   presentQuestion();
 }
 
-function generateUniqueQuestions(tables) {
-  const pool = [];
-  for (const a of tables) {
-    for (const b of tables) {
-      pool.push({ a, b });
+// Nombre de calculs distincts (sans doublons commutatifs) disponibles selon le mode courant.
+function poolSize() {
+  if (state.config.mode === "add") {
+    const { min, max } = state.config.add;
+    const count = max - min + 1;
+    if (count <= 0) return 0;
+    // Couples {a,b} avec min ≤ a ≤ b ≤ max : doubles autorisés (a,a) mais pas d'ordre doublon.
+    return (count * (count + 1)) / 2;
+  }
+  // Multiplication : produit cartésien des tables cochées.
+  return state.config.mult.tables.length * state.config.mult.tables.length;
+}
+
+function validateQuestionPool() {
+  if (state.config.mode === "mult") {
+    if (state.config.mult.tables.length * state.config.mult.tables.length < QUESTION_COUNT) {
+      return "Sélectionnez au moins 4 tables pour obtenir 10 calculs différents.";
+    }
+    return null;
+  }
+  // Addition : la plage doit permettre au moins 10 calculs distincts.
+  const size = poolSize();
+  if (size < QUESTION_COUNT) {
+    const { min, max } = state.config.add;
+    return `La plage ${min} à ${max} ne permet que ${size} calcul${size > 1 ? "s" : ""} différent${size > 1 ? "s" : ""}. Élargissez la plage pour obtenir 10 calculs.`;
+  }
+  return null;
+}
+
+function generateUniqueQuestions() {
+  const mode = state.config.mode;
+  let pool;
+
+  if (mode === "add") {
+    const { min, max } = state.config.add;
+    pool = [];
+    for (let a = min; a <= max; a++) {
+      for (let b = a; b <= max; b++) {
+        pool.push({ a, b, mode });
+      }
+    }
+  } else {
+    // Multiplication : produit cartésien des tables cochées.
+    const tables = state.config.mult.tables;
+    pool = [];
+    for (const a of tables) {
+      for (const b of tables) {
+        pool.push({ a, b, mode });
+      }
     }
   }
 
-  // Les nombres décochés sont exclus des deux facteurs, mais peuvent toujours apparaître comme résultat.
-  // Fisher-Yates : chaque couple a × b n'apparaît qu'une seule fois dans la mission.
-  for (let i = pool.length - 1; i > 0; i--) {
+  // Fisher-Yates : chaque couple n'apparaît qu'une seule fois dans la mission.
+  shuffleArray(pool);
+  return pool.slice(0, QUESTION_COUNT);
+}
+
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+    [array[i], array[j]] = [array[j], array[i]];
   }
-  return pool.slice(0, 10);
 }
 
 function presentQuestion() {
@@ -247,7 +421,7 @@ function presentQuestion() {
 
   document.getElementById("progressText").textContent = `Question ${state.currentIndex + 1} / 10`;
   document.getElementById("missionProgressBar").style.width = `${((state.currentIndex + 1) / 10) * 100}%`;
-  document.getElementById("question").textContent = `${q.a} × ${q.b}`;
+  document.getElementById("question").textContent = `${q.a} ${operatorSymbol(q.mode)} ${q.b}`;
   answer.value = "";
   answer.disabled = false;
   feedback.textContent = "";
@@ -292,7 +466,8 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
   state.results.push({
     a: q.a,
     b: q.b,
-    correctAnswer: q.a * q.b,
+    mode: q.mode,
+    correctAnswer: computeAnswer(q),
     userAnswer,
     correct: isCorrect,
     timedOut,
@@ -303,11 +478,13 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
   answer.disabled = true;
 
   const feedback = document.getElementById("feedback");
+  const symbol = operatorSymbol(q.mode);
+  const correctAnswer = computeAnswer(q);
   if (isCorrect) {
-    feedback.textContent = `Bravo ! ${q.a} × ${q.b} = ${q.a * q.b}`;
+    feedback.textContent = `Bravo ! ${q.a} ${symbol} ${q.b} = ${correctAnswer}`;
     feedback.className = "feedback correct";
   } else {
-    feedback.textContent = `${timedOut ? "Temps écoulé" : "Faux"} — ${q.a} × ${q.b} = ${q.a * q.b}`;
+    feedback.textContent = `${timedOut ? "Temps écoulé" : "Faux"} — ${q.a} ${symbol} ${q.b} = ${correctAnswer}`;
     feedback.className = "feedback incorrect";
   }
 
@@ -398,12 +575,17 @@ function finalizeMission() {
   // Les pauses d'affichage Bravo/Faux et le décollage ne sont pas comptés.
   const totalTime = Math.round(state.results.reduce((sum, item) => sum + item.time, 0) * 10) / 10;
   const message = encouragementFor(state.score);
-  const usedTables = [...state.config.tables].sort((a, b) => a - b);
+  const mode = state.config.mode;
+  const range = mode === "add"
+    ? `${state.config.add.min}–${state.config.add.max}`
+    : [...state.config.mult.tables].sort((a, b) => a - b).join(", ");
 
   state.finalScore = {
     score: state.score,
     time: totalTime,
-    tables: usedTables
+    mode,
+    tables: mode === "add" ? [] : [...state.config.mult.tables].sort((a, b) => a - b),
+    range: mode === "add" ? range : ""
   };
 
   document.getElementById("scoreDisplay").textContent = `${message} Score : ${state.score}/10 — Temps : ${totalTime.toFixed(1)} s`;
@@ -415,7 +597,7 @@ function finalizeMission() {
     : `Fusée construite à ${state.score}/10. Encore ${10 - state.score} pièce${10 - state.score > 1 ? "s" : ""} à gagner.`;
 
   renderDebrief();
-  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty");
+  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
   showScreen("resultScreen");
   setTimeout(() => document.getElementById("playerName").focus(), 0);
 }
@@ -437,7 +619,7 @@ function renderDebrief() {
 
     const calculation = document.createElement("td");
     calculation.className = "calculation-cell";
-    calculation.textContent = `${item.a} × ${item.b} = ${item.correctAnswer}`;
+    calculation.textContent = `${item.a} ${operatorSymbol(item.mode)} ${item.b} = ${item.correctAnswer}`;
 
     const status = document.createElement("td");
     status.className = item.correct ? "status-ok" : "status-wrong";
@@ -475,21 +657,32 @@ function saveCurrentScoreOnce() {
     name,
     score: state.finalScore.score,
     time: state.finalScore.time,
+    mode: state.finalScore.mode,
     tables: [...state.finalScore.tables],
+    range: state.finalScore.range || "",
     date: new Date().toISOString()
   });
   saveScores(scores);
   state.savedCurrentResult = true;
-  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty");
+  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
   return true;
 }
 
 // Fonction UNIQUE utilisée par le classement du menu ET par celui de fin de mission.
-function renderLeaderboard(tbodyId, emptyStateId) {
+// Le paramètre mode filtre les scores pour n'afficher que le mode demandé.
+function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
   const tbody = document.getElementById(tbodyId);
   const emptyState = document.getElementById(emptyStateId);
-  const scores = getTopScores(20);
+  const scores = getTopScores(20, mode);
   tbody.innerHTML = "";
+
+  // Ajuste l'en-tête de la dernière colonne selon le mode.
+  const detailHeader = tbodyId === "resultLeaderboardBody"
+    ? document.getElementById("resultLeaderboardDetailHeader")
+    : document.getElementById("leaderboardDetailHeader");
+  if (detailHeader) {
+    detailHeader.textContent = mode === "add" ? "Plage utilisée" : "Tables utilisées";
+  }
 
   if (scores.length === 0) {
     emptyState.hidden = false;
@@ -500,6 +693,7 @@ function renderLeaderboard(tbodyId, emptyStateId) {
   emptyState.hidden = true;
   tbody.closest("table").hidden = false;
 
+  const isAdd = mode === "add";
   scores.forEach((entry) => {
     const row = document.createElement("tr");
 
@@ -512,18 +706,25 @@ function renderLeaderboard(tbodyId, emptyStateId) {
     const time = document.createElement("td");
     time.textContent = `${Number(entry.time).toFixed(1)} s`;
 
-    const tables = document.createElement("td");
-    tables.textContent = entry.tables.length ? entry.tables.join(", ") : "—";
+    const detail = document.createElement("td");
+    if (isAdd) {
+      detail.textContent = entry.range ? entry.range : "—";
+    } else {
+      detail.textContent = entry.tables.length ? entry.tables.join(", ") : "—";
+    }
 
-    row.append(name, score, time, tables);
+    if (isAdd) detail.classList.add("range-cell");
+
+    row.append(name, score, time, detail);
     tbody.appendChild(row);
   });
 }
 
-function getTopScores(limit) {
+function getTopScores(limit, mode = "mult") {
   return loadScores()
     .map(normalizeScore)
     .filter(Boolean)
+    .filter((entry) => entry.mode === mode)
     .sort((a, b) => (b.score - a.score) || (a.time - b.time))
     .slice(0, limit);
 }
@@ -533,12 +734,26 @@ function normalizeScore(entry) {
   const name = String(entry.name ?? "").trim();
   const score = Number(entry.score);
   const time = Number(entry.time);
+
+  // Les anciens scores (sans champ mode) sont affectés au mode Multiplications.
+  const mode = entry.mode === "add" ? "add" : "mult";
+
   const tables = Array.isArray(entry.tables)
-    ? entry.tables.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 10).sort((a,b) => a-b)
+    ? entry.tables.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 10).sort((a, b) => a - b)
     : [];
 
+  let range = String(entry.range ?? "").trim();
+  // Pour un score addition dont on ne connaît pas la plage explicite, on la déduit des termes.
+  if (mode === "add" && !range) {
+    const min = Array.isArray(entry.aValues) ? Math.min(...entry.aValues) : null;
+    const max = Array.isArray(entry.bValues) ? Math.max(...entry.bValues) : null;
+    if (min != null && max != null && Number.isFinite(min) && Number.isFinite(max)) {
+      range = `${min}–${max}`;
+    }
+  }
+
   if (!name || !Number.isFinite(score) || !Number.isFinite(time)) return null;
-  return { name, score, time, tables, date: entry.date || "" };
+  return { name, score, time, mode, tables, range, date: entry.date || "" };
 }
 
 function loadScores() {
@@ -557,51 +772,105 @@ function saveScores(scores) {
 }
 
 function loadConfig() {
-  try {
-    const raw = localStorage.getItem(STORAGE.config);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return normalizeConfig(parsed);
+  const v11Raw = localStorage.getItem(STORAGE.config);
+  if (v11Raw) {
+    try {
+      return normalizeConfig(JSON.parse(v11Raw));
+    } catch {
+      // Config v11 invalide : on tente la migration v10 ci-dessous.
     }
+  }
 
+  const migrated = migrateConfigIfNeeded();
+  if (migrated) return migrated;
+
+  // Dernier recours : anciennes clés pré-v10b (rare).
+  try {
     const legacyTablesRaw = localStorage.getItem(STORAGE.legacyTables);
     const legacyTimeRaw = localStorage.getItem(STORAGE.legacyTime);
     if (legacyTablesRaw || legacyTimeRaw) {
       return normalizeConfig({
-        tables: legacyTablesRaw ? JSON.parse(legacyTablesRaw) : DEFAULT_CONFIG.tables,
+        mult: {
+          tables: legacyTablesRaw ? JSON.parse(legacyTablesRaw) : DEFAULT_CONFIG.mult.tables
+        },
         timePerQuestion: legacyTimeRaw ? Number(legacyTimeRaw) : DEFAULT_CONFIG.timePerQuestion
       });
     }
   } catch {
     // Valeurs par défaut ci-dessous.
   }
-  return { ...DEFAULT_CONFIG, tables: [...DEFAULT_CONFIG.tables] };
+  return normalizeConfig();
+}
+
+// S'il existe une config v10 (multiplication seule) et pas encore de config v11,
+// on migre la v10 vers v11 en la conservant intacte.
+function migrateConfigIfNeeded() {
+  try {
+    const v10Raw = localStorage.getItem(STORAGE.legacyConfig);
+    if (!v10Raw) return null;
+    const v10 = JSON.parse(v10Raw);
+
+    const migrated = normalizeConfig({
+      mode: "mult",
+      timePerQuestion: v10?.timePerQuestion,
+      mult: { tables: v10?.tables },
+      add: { ...DEFAULT_CONFIG.add }
+    });
+    saveConfigRaw(migrated);
+    return migrated;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeConfig(config) {
-  let tables = Array.isArray(config?.tables)
-    ? config.tables.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 10)
-    : [...DEFAULT_CONFIG.tables];
+  config = config && typeof config === "object" ? config : {};
+
+  const mode = config.mode === "add" ? "add" : "mult";
+
+  // Paramètres du mode multiplication (tables cochées).
+  let tables = Array.isArray(config?.mult?.tables) || Array.isArray(config?.tables)
+    ? (Array.isArray(config?.mult?.tables) ? config.mult.tables : config.tables)
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 10)
+    : [...DEFAULT_CONFIG.mult.tables];
   tables = [...new Set(tables)].sort((a, b) => a - b);
-  if (tables.length === 0) tables = [...DEFAULT_CONFIG.tables];
+  if (tables.length === 0) tables = [...DEFAULT_CONFIG.mult.tables];
+
+  // Paramètres du mode addition (plage min/max, zéro interdit).
+  let min = Number(config?.add?.min);
+  let max = Number(config?.add?.max);
+  if (!Number.isInteger(min)) min = DEFAULT_CONFIG.add.min;
+  if (!Number.isInteger(max)) max = DEFAULT_CONFIG.add.max;
+  min = Math.min(99, Math.max(1, min));
+  max = Math.min(99, Math.max(1, max));
+  if (min > max) [min, max] = [max, min];
 
   let timePerQuestion = Number(config?.timePerQuestion);
   if (!Number.isFinite(timePerQuestion)) timePerQuestion = DEFAULT_CONFIG.timePerQuestion;
   timePerQuestion = Math.min(60, Math.max(1, Math.round(timePerQuestion * 10) / 10));
 
-  return { tables, timePerQuestion };
+  return { mode, timePerQuestion, mult: { tables }, add: { min, max } };
 }
 
 function saveConfig() {
-  localStorage.setItem(STORAGE.config, JSON.stringify(state.config));
+  saveConfigRaw(state.config);
 }
 
-function migrateLegacyScoresIfPossible() {
+function saveConfigRaw(config) {
+  localStorage.setItem(STORAGE.config, JSON.stringify(config));
+}
+
+// Migration des scores v10 (et pré-v10b) vers v11, uniquement si aucune donnée v11 n'existe.
+function migrateScoresIfNeeded() {
   if (localStorage.getItem(STORAGE.scores)) return;
 
+  // Source prioritaire : scores v10.
+  let legacyRaw = localizedGetItem(STORAGE.legacyScores)
+    || localizedGetItem(STORAGE.oldLegacyScores);
+  if (!legacyRaw) return;
+
   try {
-    const legacyRaw = localStorage.getItem(STORAGE.legacyScores);
-    if (!legacyRaw) return;
     const legacy = JSON.parse(legacyRaw);
     if (!Array.isArray(legacy)) return;
     const normalized = legacy.map(normalizeScore).filter(Boolean);
@@ -610,3 +879,35 @@ function migrateLegacyScoresIfPossible() {
     // Pas de migration si l'ancien format est invalide.
   }
 }
+
+function localizedGetItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+// --- Classements à onglets (menu « Tableau des scores ») ---
+// Active visuellement l'onglet du mode demandé.
+function activateLeaderboardTab(mode) {
+  document.querySelectorAll("[data-leaderboard-mode]").forEach((tab) => {
+    const active = tab.dataset.leaderboardMode === mode;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function switchLeaderboardMode(mode) {
+  activateLeaderboardTab(mode);
+  const headline = document.getElementById("leaderboardHeadline");
+  if (headline) {
+    headline.textContent = `Top 20 — ${modeLabel(mode)}`;
+  }
+  const detailHeader = document.getElementById("leaderboardDetailHeader");
+  if (detailHeader) {
+    detailHeader.textContent = mode === "add" ? "Plage utilisée" : "Tables utilisées";
+  }
+  renderLeaderboard("leaderboardBody", "leaderboardEmpty", mode);
+}
+
