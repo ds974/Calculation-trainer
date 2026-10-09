@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#102331">
+  <title>Mission Multiplications</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section id="homeScreen" class="screen active home-screen" aria-labelledby="homeTitle">
+      <div class="home-card">
+        <div class="mission-mark" aria-hidden="true">
+          <svg viewBox="0 0 90 90" role="img">
+            <defs>
+              <linearGradient id="homePlanetGradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#7ee2d1"/>
+                <stop offset="1" stop-color="#4b87bd"/>
+              </linearGradient>
+              <linearGradient id="homeRocketGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#ffd77b"/>
+                <stop offset="1" stop-color="#f28f6b"/>
+              </linearGradient>
+            </defs>
+            <circle cx="45" cy="45" r="18" fill="url(#homePlanetGradient)" opacity=".95"/>
+            <ellipse cx="45" cy="45" rx="35" ry="13" fill="none" stroke="#b9d6e6" stroke-width="3" transform="rotate(-17 45 45)" opacity=".9"/>
+            <path d="M65 16c8 5 11 13 8 22l-8 3-5-7 2-10z" fill="url(#homeRocketGradient)"/>
+            <path d="M62 38l-8 8 2-11z" fill="#e97760"/>
+            <circle cx="68" cy="26" r="3" fill="#dff6ff"/>
+            <circle cx="23" cy="21" r="2" fill="#dff6ff"/>
+            <circle cx="72" cy="63" r="1.7" fill="#dff6ff"/>
+            <circle cx="18" cy="61" r="1.2" fill="#dff6ff"/>
+          </svg>
+        </div>
+        <div class="eyebrow">Calcul mental</div>
+        <h1 id="homeTitle">Mission Multiplications</h1>
+        <p class="subtitle">10 calculs, un chrono et une fusée à construire.</p>
+        <div class="home-actions">
+          <button class="btn btn-primary btn-large" data-action="start">Lancer une mission</button>
+          <div class="secondary-actions">
+            <button class="btn btn-secondary" data-action="config">Paramètres</button>
+            <button class="btn btn-secondary" data-action="leaderboard">Tableau des scores</button>
+          </div>
+        </div>
+      </div>
+      <footer>© Didier SEBASTIEN — 2026 · v10d</footer>
+    </section>
+
+    <section id="configScreen" class="screen" aria-labelledby="configTitle">
+      <div class="panel narrow-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Préparation de mission</span>
+          <h2 id="configTitle">Paramètres</h2>
+        </div>
+        <p class="muted">Les modifications sont enregistrées automatiquement.</p>
+
+        <fieldset class="config-group">
+          <legend>Tables utilisées</legend>
+          <div id="tableCheckboxes" class="table-grid"></div>
+          <p id="tableWarning" class="inline-message" aria-live="polite"></p>
+        </fieldset>
+
+        <div class="config-group time-setting">
+          <label for="timeLimit">Temps par question</label>
+          <div class="number-control">
+            <input type="number" id="timeLimit" min="1" max="60" step="0.5" inputmode="decimal">
+            <span>secondes</span>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" data-action="home">Retour à l’accueil</button>
+      </div>
+    </section>
+
+    <section id="leaderboardScreen" class="screen" aria-labelledby="leaderboardTitle">
+      <div class="panel wide-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Centre de contrôle</span>
+          <h2 id="leaderboardTitle">Tableau des scores</h2>
+        </div>
+        <p class="muted">Les 20 meilleurs résultats, classés par score puis par temps.</p>
+        <div id="leaderboardEmpty" class="empty-state" hidden>Aucun score enregistré pour le moment.</div>
+        <div class="table-scroll">
+          <table class="leaderboard-table" aria-label="Tableau des scores">
+            <thead>
+              <tr>
+                <th>Prénom</th>
+                <th>Score</th>
+                <th>Temps</th>
+                <th>Tables utilisées</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardBody"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-primary" data-action="home">Retour à l’accueil</button>
+      </div>
+    </section>
+
+    <section id="gameScreen" class="screen game-screen" aria-labelledby="missionTitle">
+      <div class="game-panel">
+        <div class="game-topline">
+          <span id="missionTitle">Mission en cours</span>
+          <span id="progressText">Question 1 / 10</span>
+        </div>
+        <div class="mission-progress" aria-hidden="true">
+          <div id="missionProgressBar" class="mission-progress-bar"></div>
+        </div>
+
+        <div class="question-zone">
+          <div id="question" class="question-display" aria-live="polite"></div>
+          <label class="sr-only" for="answer">Votre réponse</label>
+          <input type="text" id="answer" class="answer-input" autocomplete="off" inputmode="none" pattern="[0-9]*" aria-describedby="keypadHint">
+          <span id="keypadHint" class="sr-only">Utilisez le pavé numérique à l’écran ou votre clavier physique.</span>
+
+          <div class="keypad" id="numericKeypad" aria-label="Pavé numérique">
+            <button type="button" class="keypad-key" data-key="1">1</button>
+            <button type="button" class="keypad-key" data-key="2">2</button>
+            <button type="button" class="keypad-key" data-key="3">3</button>
+            <button type="button" class="keypad-key" data-key="4">4</button>
+            <button type="button" class="keypad-key" data-key="5">5</button>
+            <button type="button" class="keypad-key" data-key="6">6</button>
+            <button type="button" class="keypad-key" data-key="7">7</button>
+            <button type="button" class="keypad-key" data-key="8">8</button>
+            <button type="button" class="keypad-key" data-key="9">9</button>
+            <button type="button" class="keypad-key keypad-key-secondary" data-key="clear" aria-label="Effacer toute la saisie">C</button>
+            <button type="button" class="keypad-key" data-key="0">0</button>
+            <button type="button" class="keypad-key keypad-key-secondary" data-key="backspace" aria-label="Effacer le dernier chiffre">⌫</button>
+          </div>
+
+          <div id="feedback" class="feedback" aria-live="assertive"></div>
+        </div>
+
+        <div id="timerWidget" class="timer-widget" aria-label="Temps restant">
+          <svg class="timer-svg" viewBox="0 0 84 84" aria-hidden="true">
+            <circle class="timer-ring-bg" cx="42" cy="42" r="34"/>
+            <circle id="timerRing" class="timer-ring" cx="42" cy="42" r="34" pathLength="100"/>
+          </svg>
+          <div class="timer-value"><strong><span id="time">5.0</span></strong><small>s</small></div>
+        </div>
+
+        <div id="rocketZone" class="rocket-zone" aria-label="Progression de la fusée">
+          <div class="rocket-copy">
+            <span>Construction de la fusée</span>
+            <strong id="rocketPieceCount">0 / 10</strong>
+          </div>
+
+          <div class="rocket-stage">
+            <div id="launchMessage" class="launch-message" aria-live="polite"></div>
+            <svg id="rocketAssembly" class="rocket-svg" viewBox="0 0 180 280" role="img" aria-label="Fusée composée de dix éléments">
+              <defs>
+                <linearGradient id="rocketBodyGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#e9f6fb"/>
+                  <stop offset=".5" stop-color="#9fd8e8"/>
+                  <stop offset="1" stop-color="#5aa8c3"/>
+                </linearGradient>
+                <linearGradient id="rocketBodyAltGradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#78c8d8"/>
+                  <stop offset=".5" stop-color="#d9f3f6"/>
+                  <stop offset="1" stop-color="#6db4ca"/>
+                </linearGradient>
+                <linearGradient id="rocketFinGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#ff9574"/>
+                  <stop offset="1" stop-color="#d85f66"/>
+                </linearGradient>
+                <linearGradient id="rocketNoseGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#ffd76d"/>
+                  <stop offset="1" stop-color="#f3a34f"/>
+                </linearGradient>
+                <radialGradient id="rocketWindowGradient" cx="35%" cy="30%" r="70%">
+                  <stop offset="0" stop-color="#edfaff"/>
+                  <stop offset=".45" stop-color="#6ec8e7"/>
+                  <stop offset="1" stop-color="#235e82"/>
+                </radialGradient>
+                <linearGradient id="rocketEngineGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#758596"/>
+                  <stop offset="1" stop-color="#3d4b59"/>
+                </linearGradient>
+                <linearGradient id="rocketFlameGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#fff2a8"/>
+                  <stop offset=".45" stop-color="#ffb04a"/>
+                  <stop offset="1" stop-color="#f2635c"/>
+                </linearGradient>
+              </defs>
+
+              <ellipse class="rocket-ground-shadow" cx="90" cy="263" rx="40" ry="7"/>
+
+              <g class="rocket-piece rocket-body-piece" data-piece="1">
+                <path d="M72 216h36l7 17H65z" fill="url(#rocketEngineGradient)"/>
+                <rect x="76" y="225" width="28" height="10" rx="4" fill="#35414d"/>
+              </g>
+              <g class="rocket-piece rocket-body-piece" data-piece="2">
+                <path d="M64 174h52l-7 44H71z" fill="url(#rocketBodyGradient)"/>
+                <path d="M74 178h9v34h-9z" fill="#fff" opacity=".25"/>
+              </g>
+              <g class="rocket-piece rocket-body-piece" data-piece="3">
+                <path d="M60 124h60v52H60z" fill="url(#rocketBodyAltGradient)"/>
+                <path d="M69 128h10v43H69z" fill="#fff" opacity=".23"/>
+              </g>
+              <g class="rocket-piece rocket-body-piece" data-piece="4">
+                <path d="M61 77h58l1 49H60z" fill="url(#rocketBodyGradient)"/>
+                <path d="M69 82h9v39h-9z" fill="#fff" opacity=".25"/>
+              </g>
+              <g class="rocket-piece rocket-fin-piece" data-piece="5">
+                <path d="M64 154c-18 10-29 31-31 61l37-17z" fill="url(#rocketFinGradient)"/>
+                <path d="M60 166c-10 10-16 22-19 37l20-9z" fill="#ffb095" opacity=".42"/>
+              </g>
+              <g class="rocket-piece rocket-fin-piece" data-piece="6">
+                <path d="M116 154c18 10 29 31 31 61l-37-17z" fill="url(#rocketFinGradient)"/>
+                <path d="M120 166c10 10 16 22 19 37l-20-9z" fill="#ffb095" opacity=".42"/>
+              </g>
+              <g class="rocket-piece rocket-window-piece" data-piece="7">
+                <circle cx="90" cy="111" r="17" fill="#346985"/>
+                <circle cx="90" cy="111" r="12" fill="url(#rocketWindowGradient)"/>
+                <circle cx="85" cy="106" r="3" fill="#fff" opacity=".7"/>
+              </g>
+              <g class="rocket-piece rocket-nose-piece" data-piece="8">
+                <path d="M61 79c4-28 15-47 29-61 14 14 25 33 29 61z" fill="url(#rocketNoseGradient)"/>
+                <path d="M72 70c4-17 10-29 18-39 3 4 6 8 8 13-8 5-15 14-20 26z" fill="#fff" opacity=".26"/>
+              </g>
+              <g class="rocket-piece rocket-flame-piece" data-piece="9">
+                <path d="M76 234c-5 14-2 25 8 36 7-15 8-26 2-36z" fill="url(#rocketFlameGradient)"/>
+              </g>
+              <g class="rocket-piece rocket-flame-piece" data-piece="10">
+                <path d="M94 234c-4 15-1 27 8 38 8-16 9-28 3-38z" fill="url(#rocketFlameGradient)"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="resultScreen" class="screen" aria-labelledby="resultTitle">
+      <div class="panel wide-panel result-panel">
+        <div class="section-heading result-heading">
+          <span class="section-kicker">Rapport de mission</span>
+          <h2 id="resultTitle">Mission terminée</h2>
+        </div>
+        <div id="scoreDisplay" class="result-summary"></div>
+        <div id="missionReward" class="mission-reward"></div>
+
+        <h3>Débriefing de la mission</h3>
+        <div class="table-scroll compact-table-wrap">
+          <table class="debrief-table" aria-label="Débriefing des questions">
+            <thead>
+              <tr>
+                <th>Calcul et correction</th>
+                <th>Résultat</th>
+                <th>Temps</th>
+              </tr>
+            </thead>
+            <tbody id="feedbackBody"></tbody>
+          </table>
+        </div>
+
+        <div class="name-block">
+          <label for="playerName">Prénom</label>
+          <input type="text" id="playerName" maxlength="30" autocomplete="given-name" placeholder="Votre prénom">
+          <p id="nameWarning" class="inline-message" aria-live="polite"></p>
+        </div>
+
+        <div class="result-actions">
+          <button class="btn btn-primary" data-action="restart">Nouvelle partie</button>
+          <button class="btn btn-secondary" data-action="save-home">Enregistrer et revenir à l’accueil</button>
+        </div>
+
+        <h3>Top 20 des scores</h3>
+        <div id="resultLeaderboardEmpty" class="empty-state" hidden>Aucun score enregistré pour le moment.</div>
+        <div class="table-scroll">
+          <table class="leaderboard-table" aria-label="Top 20 des scores">
+            <thead>
+              <tr>
+                <th>Prénom</th>
+                <th>Score</th>
+                <th>Temps</th>
+                <th>Tables utilisées</th>
+              </tr>
+            </thead>
+            <tbody id="resultLeaderboardBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
