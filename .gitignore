@@ -1,0 +1,23 @@
+# --- Base de données SQLite et fichiers auxiliaires ---
+storage/*.sqlite
+storage/*.sqlite-wal
+storage/*.sqlite-shm
+storage/*.sqlite-journal
+
+# --- Fichiers de configuration contenant des secrets ---
+.env
+*.secret
+config/*.local.php
+
+# --- Journaux et fichiers temporaires ---
+*.log
+*.tmp
+.DS_Store
+*.swp
+
+# --- Données personnelles / téléversements éventuels ---
+# (aucun répertoire de données utilisateur doit être versionné)
+
+# --- Divers ---
+node_modules/
+vendor/
