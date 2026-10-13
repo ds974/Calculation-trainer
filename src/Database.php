@@ -103,31 +103,28 @@ final class Database
     {
         $pdo = $this->pdo;
 
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS users (
+        // Utilisation de guillemets doubles PHP pour éviter d'échapper les apostrophes SQL.
+        $pdo->exec("CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 login         TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 email         TEXT,
                 password_hash TEXT NOT NULL,
-                role          TEXT NOT NULL DEFAULT \'user\'
-                              CHECK (role IN (\'user\', \'admin\')),
+                role          TEXT NOT NULL DEFAULT 'user'
+                              CHECK (role IN ('user', 'admin')),
                 created_at    TEXT NOT NULL
-                              DEFAULT (strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\'))
-            )'
-        );
+                              DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )");
 
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS results (
+        $pdo->exec("CREATE TABLE IF NOT EXISTS results (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
                 played_at  TEXT NOT NULL
-                           DEFAULT (strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\')),
+                           DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 mode       TEXT NOT NULL
-                           CHECK (mode IN (\'multiplication\', \'addition\')),
+                           CHECK (mode IN ('multiplication', 'addition')),
                 score      INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            )'
-        );
+            )");
 
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_mode ON results(mode)');
