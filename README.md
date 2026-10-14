@@ -15,7 +15,11 @@ et une base **SQLite**, tout en conservant intégralement les fonctionnalités d
 ```text
 calculation-trainer/
 ├── public/                     # Racine documentaire (SEULE zone exposée par HTTP)
-│   └── api/index.php           # Front controller (créé à l'étape des API)
+│   ├── index.html              # Application monopage (jeu v11, SPA)
+│   ├── style.css               # Thème spatial, SVG & animations
+│   ├── app.js                  # Logique du jeu (chargé après guest-history.js)
+│   ├── guest-history.js        # Historique & import invité v12
+│   └── api/index.php           # Front controller des API (auth + résultats)
 ├── src/                        # NON accessible par HTTP
 │   ├── bootstrap.php           # Constantes de chemins + autoload léger
 │   ├── Database.php            # Connexion PDO SQLite (WAL, FK, busy_timeout)
@@ -121,7 +125,7 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
 
 ### Mode invité et historique local
 
-- `guest-history.js` : module autonome, exposé en `window.MissionGuestHistory`.
+- `public/guest-history.js` : module autonome, exposé en `window.MissionGuestHistory`.
   - Espace `localStorage` DÉDIÉ v12 : `missionCalculMental.history.v12`
     (trace d'imports réussis : `missionCalculMental.history.v12.imported`).
   - Les clés v10/v11 existantes ne sont **ni lues, ni modifiées, ni supprimées**.
@@ -129,7 +133,7 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
     `guest_id` stable pour un import idempotent ultérieur).
   - En connecté (`setSession()` non null) : la partie est envoyée au serveur,
     jamais stockée localement (pas de mélange invité / compte).
-- Intégration dans `app.js` : `finalizeMission()` appelle `GuestHistoryV12.record()`
+- Intégration dans `public/app.js` : `finalizeMission()` appelle `GuestHistoryV12.record()`
   à la fin de chaque partie terminée.
 
 ### Import invité
