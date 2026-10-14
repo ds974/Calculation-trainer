@@ -30,9 +30,17 @@ final class Database
      */
     public function __construct(string $projectRoot)
     {
-        $storageDir = $projectRoot . DIRECTORY_SEPARATOR . 'storage';
+        // Permet aux tests/tools d'isoler une base jetable via une variable
+        // d'environnement (absente en production). Aucun impact en usage normal.
+        $override = getenv('CALC_TRAINER_STORAGE_OVERRIDE');
+        if (is_string($override) && $override !== '') {
+            $storageDir = $override;
+        } else {
+            $storageDir = $projectRoot . DIRECTORY_SEPARATOR . 'storage';
+        }
+
         if (!is_dir($storageDir)) {
-            // Le dossier storage/ doit exister ; sinon on crée pour faciliter l'init.
+            // Le dossier de stockage doit exister ; sinon on crée pour faciliter l'init.
             if (!@mkdir($storageDir, 0775, true) && !is_dir($storageDir)) {
                 throw new RuntimeException(
                     "Impossible de créer le répertoire de stockage : {$storageDir}"
@@ -40,7 +48,8 @@ final class Database
             }
         }
 
-        $this->path = $storageDir . DIRECTORY_SEPARATOR . 'calculation-trainer.sqlite';
+        $this->path = rtrim($storageDir, DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR . 'calculation-trainer.sqlite';
         $this->connect();
     }
 
@@ -129,6 +138,18 @@ final class Database
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_mode ON results(mode)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_played ON results(played_at)');
+
+        // Table de limitation des tentatives de connexion (anti brute-force).
+        $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                login          TEXT,
+                ip_address     TEXT,
+                attempted_at   TEXT NOT NULL
+                               DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                success        INTEGER NOT NULL DEFAULT 0
+            )");
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_attempts_login ON login_attempts(login)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address)');
     }
 
     /** Retourne la connexion PDO unique. */

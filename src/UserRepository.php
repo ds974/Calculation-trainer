@@ -116,4 +116,14 @@ final class UserRepository
     {
         return (int)$this->pdo->query('SELECT COUNT(*) AS c FROM users')->fetch()['c'];
     }
+
+    /**
+     * Compte les administrateurs (protection du dernier admin).
+     */
+    public function countAdmins(): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS c FROM users WHERE role = :role');
+        $stmt->execute(['role' => 'admin']);
+        return (int)$stmt->fetch()['c'];
+    }
 }

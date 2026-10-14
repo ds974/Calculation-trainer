@@ -15,6 +15,10 @@ config/*.local.php
 .DS_Store
 *.swp
 
+# --- Fichiers de sortie temporaires des tests ---
+tests/.http_out.txt
+tests/*.out.txt
+
 # --- Données personnelles / téléversements éventuels ---
 # (aucun répertoire de données utilisateur doit être versionné)
 
