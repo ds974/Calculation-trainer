@@ -32,7 +32,7 @@ final class TestRunner
 
     public function run(): int
     {
-        echo "\n=== Tests Mission Calcul Mental — Backend (étapes 1 et 2) ===\n\n";
+        echo "\n=== Tests Mission Calcul Mental — Backend (étapes 1, 2 et 3) ===\n\n";
 
         $this->testDatabasePragmas();
         $this->testSchemaAndUniqueness();
@@ -46,6 +46,15 @@ final class TestRunner
         $this->testAuthorization();
         $this->testCsrf();
         $this->testUnauthenticatedAccess();
+
+        // Étape 3 : enregistrement des résultats, historique et import invité.
+        $this->testResultSave();
+        $this->testResultValidation();
+        $this->testResultAuth();
+        $this->testResultHistoryIsolation();
+        $this->testGuestImport();
+        $this->testGuestImportDuplicate();
+        $this->testGuestImportMalformed();
 
         echo "\n=== Résumé ===\n";
         echo "Tests réussis : {$this->passed}\n";
@@ -503,6 +512,101 @@ final class TestRunner
         }
     }
 
+    // --- Étape 3 : enregistrement d'un résultat valide ---
+
+    private function testResultSave(): void
+    {
+        echo "[Enregistrement des résultats]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+
+            $id = $repo->create([
+                'login' => 'save_user', 'email' => 's@ex.fr',
+                'password' => 'motdepasse10', 'role' => 'user',
+            ]);
+
+            $rid = $results->save($id, 'multiplication', 9);
+            $this->check($rid > 0, 'Enregistrement d\'un résultat valide (multiplication, 9/10)');
+
+            $rid2 = $results->save($id, 'addition', 7, '2026-01-15T10:20:30Z');
+            $this->check($rid2 > 0, 'Enregistrement avec date de fin UTC explicite');
+
+            $history = $results->history($id);
+            $this->check(count($history) === 2, 'Historique contient 2 parties');
+            $row = $history[0];
+            $this->check(
+                ($row['score'] ?? -1) === 9 && ($row['mode'] ?? '') === 'multiplication',
+                'Historique ordonné (plus récent d\'abord) et champs corrects'
+            );
+            $this->check(!isset($row['user_id']), 'Historique sans données sensibles (user_id non exposé)');
+        } catch (Throwable $e) {
+            $this->check(false, "Enregistrement : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 3 : validation des modes et scores ---
+
+    private function testResultValidation(): void
+    {
+        echo "[Validation des résultats]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $id = $repo->create([
+                'login' => 'val_user', 'email' => '',
+                'password' => 'motdepasse10', 'role' => 'user',
+            ]);
+
+            $rejected = 0;
+            $attempts = [
+                ['mode' => 'soustraction', 'score' => 8],
+                ['mode' => 'multiplication', 'score' => 11],
+                ['mode' => 'multiplication', 'score' => -1],
+                ['mode' => 'multiplication', 'score' => 3, 'played_at' => 'pas-une-date'],
+            ];
+            foreach ($attempts as $a) {
+                try {
+                    $results->save($id, $a['mode'], $a['score'], $a['played_at'] ?? null);
+                } catch (InvalidArgumentException) {
+                    $rejected++;
+                }
+            }
+            $this->check($rejected === count($attempts), 'Refus des modes et scores invalides');
+            $this->check(count($results->history($id)) === 0, 'Aucun résultat invalide persistant');
+        } catch (Throwable $e) {
+            $this->check(false, "Validation : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 3 : refus d'accès sans authentification (niveau service) ---
+
+    private function testResultAuth(): void
+    {
+        echo "[Autorisation des résultats]\n";
+        try {
+            if (session_status() !== PHP_SESSION_ACTIVE) {
+                @session_start();
+            }
+            $_SESSION = [];
+
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $auth = new AuthService($pdo, $repo);
+
+            // Sans session : currentUser() = null => l'API répondra 401.
+            $this->check($auth->currentUser() === null, 'Enregistrement refusé sans authentification (pas de session)');
+        } catch (Throwable $e) {
+            $this->check(false, "Autorisation résultats : {$e->getMessage()}");
+        }
+    }
+
     private function cleanup(): void
     {
         $files = glob($this->tmpRoot . '/*');
@@ -513,7 +617,116 @@ final class TestRunner
         }
         @rmdir($this->tmpRoot);
     }
-}
 
+    // --- Étape 3 : isolation de l'historique entre utilisateurs ---
+
+    private function testResultHistoryIsolation(): void
+    {
+        echo "[Historique et isolation]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+
+            $a = $repo->create(['login' => 'hist_a', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+            $b = $repo->create(['login' => 'hist_b', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            $results->save($a, 'multiplication', 10);
+            $results->save($a, 'addition', 6);
+
+            $this->check(count($results->history($a)) === 2, 'A consulte son propre historique (2 parties)');
+            $this->check(count($results->history($b)) === 0, 'B ne consulte pas l\'historique de A');
+        } catch (Throwable $e) {
+            $this->check(false, "Historique/isolation : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 3 : import invité valide ---
+
+    private function testGuestImport(): void
+    {
+        echo "[Import invité]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $id = $repo->create(['login' => 'guest_imp', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            $items = [
+                ['guest_id' => 'v12-aaa111', 'mode' => 'multiplication', 'score' => 8, 'played_at' => '2026-01-10T08:00:00Z'],
+                ['guest_id' => 'v12-bbb222', 'mode' => 'addition', 'score' => 4, 'played_at' => '2026-01-11T09:30:00Z'],
+                ['guest_id' => 'v12-ccc333', 'mode' => 'multiplication', 'score' => 10, 'played_at' => '2026-01-12T10:00:00Z'],
+            ];
+            $out = $results->importGuest($id, $items);
+            $this->check($out['imported'] === 3 && $out['skipped'] === 0, 'Import invité valide (3 importées, 0 sautées)');
+            $this->check(count($results->history($id)) === 3, 'Import : 3 parties ajoutées à l\'historique');
+        } catch (Throwable $e) {
+            $this->check(false, "Import invité : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 3 : idempotence de l'import (doublons) ---
+
+    private function testGuestImportDuplicate(): void
+    {
+        echo "[Import invité — idempotence]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $id = $repo->create(['login' => 'guest_dup', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            $items = [
+                ['guest_id' => 'v12-ddd444', 'mode' => 'multiplication', 'score' => 9, 'played_at' => '2026-02-01T08:00:00Z'],
+            ];
+            $first = $results->importGuest($id, $items);
+            $second = $results->importGuest($id, $items); // réessai : même guest_id
+
+            $this->check($first['imported'] === 1, 'Premier envoi : 1 partie importée');
+            $this->check($second['imported'] === 0 && $second['skipped'] === 1, 'Réessai : 0 importée, doublon refusé');
+            $this->check(count($results->history($id)) === 1, 'Aucun doublon dans l\'historique après réessai');
+        } catch (Throwable $e) {
+            $this->check(false, "Import doublons : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 3 : rejet des données d'import malformées ---
+
+    private function testGuestImportMalformed(): void
+    {
+        echo "[Import invité — données malformées]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $id = $repo->create(['login' => 'guest_bad', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // Structure globale invalide (liste associative non indexée).
+            try {
+                $results->importGuest($id, ['x' => 'y']);
+                $this->check(false, 'Structure globale non-listée refusée');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'Structure globale non-listée refusée');
+            }
+
+            // Lignes individuellement malformées : ignorées, aucune écriture.
+            $bad = [
+                ['guest_id' => 'v12-bad1', 'mode' => 'inconnu', 'score' => 5, 'played_at' => '2026-03-01T08:00:00Z'],
+                ['guest_id' => 'v12-bad2', 'mode' => 'multiplication', 'score' => 99, 'played_at' => '2026-03-01T08:00:00Z'],
+                ['guest_id' => 'v12-bad3', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-03-0108:00'],
+                ['guest_id' => 'v12-bad4<b>', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-03-01T08:00:00Z'],
+            ];
+            $out = $results->importGuest($id, $bad);
+            $this->check($out['imported'] === 0 && $out['skipped'] === 4, 'Données malformées toutes sautées (0 importée)');
+            $this->check(count($results->history($id)) === 0, 'Aucune donnée malformée persistée');
+        } catch (Throwable $e) {
+            $this->check(false, "Import malformé : {$e->getMessage()}");
+        }
+    }
+}
 $runner = new TestRunner();
 exit($runner->run());

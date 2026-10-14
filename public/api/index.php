@@ -17,6 +17,9 @@ declare(strict_types=1);
  *  - profile               (GET)  : profil de l'utilisateur connecté.
  *  - profile/update        (POST) : modification de l'adresse e-mail.
  *  - profile/password      (POST) : modification du mot de passe.
+ *  - result/save           (POST) : enregistre une partie terminée (connecté).
+ *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
+ *  - result/import         (POST) : import des anciennes parties invitées (connecté).
  *
  * Sécurité : session HttpOnly/SameSite=Lax/Secure (si HTTPS), jeton CSRF
  * obligatoire pour toute opération POST, requêtes préparées, Argon2id,
@@ -46,6 +49,8 @@ try {
     $db = new Database(CALC_TRAINER_ROOT);
     $users = new UserRepository($db->pdo());
     $auth = new AuthService($db->pdo(), $users);
+    $resultRepository = new ResultRepository($db->pdo());
+    $results = new ResultService($db->pdo(), $resultRepository);
 
     switch ($action) {
         case 'health':
@@ -117,6 +122,48 @@ try {
                 (string)($parsed['new_password'] ?? '')
             );
             Response::success(['password_changed' => true]);
+            break;
+
+        case 'result/save':
+            // Enregistre une partie terminée pour l'utilisateur connecté.
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            $playedAt = isset($parsed['played_at']) && is_string($parsed['played_at'])
+                ? $parsed['played_at']
+                : null;
+            $resultId = $results->save(
+                (int)$user['id'],
+                (string)($parsed['mode'] ?? ''),
+                (int)($parsed['score'] ?? -1),
+                $playedAt
+            );
+            Response::success(['result' => ['id' => $resultId]], 201);
+            break;
+
+        case 'result/history':
+            // Historique des parties de l'utilisateur connecté.
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            Response::success(['history' => $results->history((int)$user['id'])]);
+            break;
+
+        case 'result/import':
+            // Import volontaire, idempotent et transactionnel, des parties invitées.
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            $items = isset($parsed['items']) && is_array($parsed['items'])
+                ? $parsed['items']
+                : [];
+            $outcome = $results->importGuest((int)$user['id'], $items);
+            Response::success($outcome, 201);
             break;
 
         default:

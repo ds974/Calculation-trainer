@@ -132,12 +132,28 @@ final class Database
                 mode       TEXT NOT NULL
                            CHECK (mode IN ('multiplication', 'addition')),
                 score      INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
+                guest_id   TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )");
+
+        
+        // Migration idempotente : ajoute la colonne guest_id aux bases créées avant v12 étape 3.
+        // Permet de garantir l'unicité (et donc l'idempotence) des imports invités.
+        $resultsCols = $pdo->query("PRAGMA table_info(results)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (is_array($resultsCols) && !in_array('guest_id', $resultsCols, true)) {
+            $pdo->exec('ALTER TABLE results ADD COLUMN guest_id TEXT');
+        }
 
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_mode ON results(mode)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_played ON results(played_at)');
+
+        // Index unique partiel : un même guest_id (partie invitée) ne peut être
+        // importé qu'une seule fois par utilisateur => idempotence de l'import.
+        $pdo->exec(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_results_guest
+             ON results(user_id, guest_id) WHERE guest_id IS NOT NULL'
+        );
 
         // Table de limitation des tentatives de connexion (anti brute-force).
         $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (

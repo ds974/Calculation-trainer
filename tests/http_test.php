@@ -173,6 +173,108 @@ expect('profile après logout => 401', $code === 401, "HTTP {$code}");
 [$code] = get_call("{$base}?action=inexistante", $jar);
 expect('action inconnue => 404', $code === 404, "HTTP {$code}");
 
+echo "\n=== Test HTTP — résultats et historique (étape 3) ===\n";
+
+// Après le logout précédent, la session a été détruite : on récupère un
+// NOUVEAU jeton CSRF. Cette nouvelle session n'est pas connectée.
+[$code, $csrfBody2] = get_call("{$base}?action=auth/csrf", $jar);
+$csrf2 = json_decode($csrfBody2, true);
+$token2 = is_array($csrf2) ? (string)($csrf2['data']['token'] ?? '') : '';
+expect('auth/csrf après logout (nouvelle session)', $token2 !== '', '');
+
+// Enregistrement avec session valide (jeton OK) mais non connectée => 401.
+[$code, $saveBody] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'multiplication', 'score' => 8, 'csrf_token' => $token2], $jar);
+expect('result/save sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// Import sans connexion => 401.
+[$code] = http_call('POST', $base, ['action' => 'result/import', 'items' => [], 'csrf_token' => $token2], $jar);
+expect('result/import sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// Historique sans connexion => 401.
+[$code] = get_call("{$base}?action=result/history", $jar);
+expect('result/history sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// On se connecte avec la session alice (cookie déjà dans le jar).
+[$code, $loginBody2] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'alice', 'password' => 'secretpass123', 'csrf_token' => $token2], $jar);
+$login2 = json_decode($loginBody2, true);
+expect('reconnexion alice => 200', $code === 200 && isset($login2['data']['user']), "HTTP {$code}");
+
+// Après login, on récupère un jeton frais dans la session régénérée.
+[$code, $csrfBody3] = get_call("{$base}?action=auth/csrf", $jar);
+$csrf3 = json_decode($csrfBody3, true);
+$token3 = is_array($csrf3) ? (string)($csrf3['data']['token'] ?? '') : '';
+expect('auth/csrf après connexion (jeton frais)', $token3 !== '', '');
+
+// Enregistrement d'un résultat valide (connecté) => 201.
+[$code, $saveOk] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'multiplication', 'score' => 9, 'csrf_token' => $token3], $jar);
+$saveOkJ = json_decode($saveOk, true);
+expect('result/save connecté (valide) => 201', $code === 201 && isset($saveOkJ['data']['result']['id']) && $saveOkJ['data']['result']['id'] > 0, "HTTP {$code}");
+
+// Mode invalide => 400.
+[$code] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'soustraction', 'score' => 9, 'csrf_token' => $token3], $jar);
+expect('result/save mode invalide => 400', $code === 400, "HTTP {$code}");
+
+// Score invalide => 400.
+[$code] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'addition', 'score' => 14, 'csrf_token' => $token3], $jar);
+expect('result/save score invalide => 400', $code === 400, "HTTP {$code}");
+
+// Historique : alice doit voir 1 résultat.
+[$code, $histBody] = get_call("{$base}?action=result/history", $jar);
+$hist = json_decode($histBody, true);
+$histCount = is_array($hist) && is_array($hist['data']['history'] ?? null) ? count($hist['data']['history']) : -1;
+expect('result/history connecté => 200, 1 partie', $code === 200 && $histCount === 1, "HTTP {$code} (nb={$histCount})");
+
+// Import invité valide => 201, imported=2.
+[$code, $impBody] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-h1', 'mode' => 'multiplication', 'score' => 7, 'played_at' => '2026-01-01T08:00:00Z'],
+    ['guest_id' => 'v12-h2', 'mode' => 'addition', 'score' => 5, 'played_at' => '2026-01-02T09:00:00Z'],
+], 'csrf_token' => $token3], $jar);
+$imp = json_decode($impBody, true);
+expect('result/import valide => 201 imported=2', $code === 201 && isset($imp['data']['imported']) && $imp['data']['imported'] === 2, "HTTP {$code}");
+
+// Réimport identique : idempotence, 0 importée, 2 sautées.
+[$code, $impDup] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-h1', 'mode' => 'multiplication', 'score' => 7, 'played_at' => '2026-01-01T08:00:00Z'],
+    ['guest_id' => 'v12-h2', 'mode' => 'addition', 'score' => 5, 'played_at' => '2026-01-02T09:00:00Z'],
+], 'csrf_token' => $token3], $jar);
+$impDupJ = json_decode($impDup, true);
+expect('result/import doublon => idempotent (imported=0, skipped=2)', $code === 201 && $impDupJ['data']['imported'] === 0 && $impDupJ['data']['skipped'] === 2, "HTTP {$code}");
+
+// Historique à présent : 1 sauvegardé + 2 importés = 3.
+[$code, $histBody2] = get_call("{$base}?action=result/history", $jar);
+$hist2 = json_decode($histBody2, true);
+$histCount2 = is_array($hist2) && is_array($hist2['data']['history'] ?? null) ? count($hist2['data']['history']) : -1;
+expect('result/history total = 3 (1 save + 2 import), pas de doublon', $code === 200 && $histCount2 === 3, "HTTP {$code} (nb={$histCount2})");
+
+// Import malformé => données invalides toutes rejetées, aucune écriture.
+[$code, $impBad] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-x1', 'mode' => 'inconnu', 'score' => 2, 'played_at' => '2026-03-01T08:00:00Z'],
+    ['guest_id' => 'v12-x2', 'mode' => 'multiplication', 'score' => 99, 'played_at' => '2026-03-01T08:00:00Z'],
+    ['guest_id' => 'v12-<x>', 'mode' => 'multiplication', 'score' => 2, 'played_at' => '2026-03-01T08:00:00Z'],
+], 'csrf_token' => $token3], $jar);
+$impBadJ = json_decode($impBad, true);
+expect('result/import malformé => imported=0, skipped=3', $code === 201 && isset($impBadJ['data']['imported']) && $impBadJ['data']['imported'] === 0, "HTTP {$code}");
+
+// Isolation : un second compte (bob) ne voit PAS l'historique d'alice.
+$jarBob = sys_get_temp_dir() . "/calc_trainer_jar_bob_{$port}.txt";
+[$code, $csrfBodyBob] = get_call("{$base}?action=auth/csrf", $jarBob);
+$csrfBob = json_decode($csrfBodyBob, true);
+$tokenBob = is_array($csrfBob) ? (string)($csrfBob['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'bob', 'password' => 'secretpass123', 'email' => 'bob@ex.fr', 'csrf_token' => $tokenBob], $jarBob);
+expect('register bob => 201', $code === 201, "HTTP {$code}");
+[$code, $logBob] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'bob', 'password' => 'secretpass123', 'csrf_token' => $tokenBob], $jarBob);
+$logBobJ = json_decode($logBob, true);
+expect('login bob => 200', $code === 200 && isset($logBobJ['data']['user']), "HTTP {$code}");
+[$code, $histBob] = get_call("{$base}?action=result/history", $jarBob);
+$histBobJ = json_decode($histBob, true);
+$histBobCount = is_array($histBobJ) && is_array($histBobJ['data']['history'] ?? null) ? count($histBobJ['data']['history']) : -1;
+expect('bob ne voit pas l\'historique d\'alice', $code === 200 && $histBobCount === 0, "HTTP {$code} (nb={$histBobCount})");
+
+// Nettoyage du cookie jar de bob (déjà géré pour l'autre jar mais bob spécifique).
+register_shutdown_function(static function () use ($jarBob): void {
+    @unlink($jarBob);
+});
+
 echo "\n=== Résumé HTTP ===\n";
 echo "Tests réussis : {$passed}\n";
 echo "Tests échoués : {$failed}\n";

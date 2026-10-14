@@ -99,6 +99,55 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
 
 ---
 
+## Étape 3 — Résultats, historique et mode invité
+
+### Enregistrement des parties (utilisateurs connectés)
+
+- Table `results` étendue : colonne `guest_id` (nullable) + index UNIQUE partiel
+  `(user_id, guest_id)` afin de garantir l'**idempotence** de l'import invité
+  (un même `guest_id` ne peut exister qu'une fois par utilisateur). Migration
+  automatique et idempotente à la connexion de la base.
+- `src/ResultRepository.php` : accès PDO préparé à la table `results`.
+- `src/ResultService.php` : logique métier — `save()`, `history()`, `importGuest()`.
+  Validation côté serveur (mode, score sur 10, horodatage UTC), transaction SQLite
+  pour l'import, refus des données malformées sans écriture partielle.
+- Nouvelles routes API (toutes soumises à session + CSRF pour les POST) :
+  - `result/save`    (POST) : enregistre une partie terminée (mode, score, played_at).
+  - `result/history` (GET)  : historique de l'utilisateur connecté.
+  - `result/import`  (POST) : import volontaire et idempotent de l'historique invité.
+- **Limite de confiance** : le score est transmis par le navigateur ; il ne peut pas
+  être vérifié côté serveur (pas de preuve anti-triche). Ces valeurs alimentent
+  l'historique personnel, mais ne doivent jamais constituer une preuve formelle.
+
+### Mode invité et historique local
+
+- `guest-history.js` : module autonome, exposé en `window.MissionGuestHistory`.
+  - Espace `localStorage` DÉDIÉ v12 : `missionCalculMental.history.v12`
+    (trace d'imports réussis : `missionCalculMental.history.v12.imported`).
+  - Les clés v10/v11 existantes ne sont **ni lues, ni modifiées, ni supprimées**.
+  - En invité : chaque partie terminée est enregistrée localement (avec un
+    `guest_id` stable pour un import idempotent ultérieur).
+  - En connecté (`setSession()` non null) : la partie est envoyée au serveur,
+    jamais stockée localement (pas de mélange invité / compte).
+- Intégration dans `app.js` : `finalizeMission()` appelle `GuestHistoryV12.record()`
+  à la fin de chaque partie terminée.
+
+### Import invité
+
+- `GuestHistoryV12.importToAccount(confirmFn)` : import volontaire, avec
+  **confirmation explicite**, envoi au serveur, et conservation d'une trace locale
+  des éléments importés (pas de réimport). Aucune donnée locale n'est supprimée en
+  cas d'échec. Le serveur refuse les doublons (colonne unique `guest_id`).
+
+> **Étape suivante** : le frontend ne possède pas encore d'interface de connexion.
+> Le module `guest-history.js` est prêt ; il restera à :
+>  - créer l'interface de connexion/inscription (login) ;
+>  - appeler `GuestHistoryV12.setSession(...)` après connexion/déconnexion ;
+>  - ajouter le bouton « Importer mon historique invité » (avec confirmation) branché
+>    sur `GuestHistoryV12.importToAccount(...)`.
+
+---
+
 ## Sécurité applicative (principes appliqués côté PHP)
 
 - Mots de passe hachés avec `password_hash(..., PASSWORD_ARGON2ID)` ; `password_verify`
