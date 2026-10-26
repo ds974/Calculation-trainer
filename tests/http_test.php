@@ -127,6 +127,24 @@ function expect(string $label, bool $ok, string $detail = ''): void
     }
 }
 
+/** Récupère les en-têtes HTTP d'une requête (listes clé => valeur). */
+function http_headers(string $url): array
+{
+    $cmd = ['curl', '-s', '-D', '-', '-o', '/dev/null', $url];
+    $out = shell_exec(implode(' ', array_map('escapeshellarg', $cmd)));
+    $headers = [];
+    foreach (explode("\n", (string)$out) as $line) {
+        $line = rtrim($line, "\r");
+        $pos = strpos($line, ':');
+        if ($pos !== false) {
+            $key = strtolower(trim(substr($line, 0, $pos)));
+            $val = trim(substr($line, $pos + 1));
+            $headers[$key] = $val;
+        }
+    }
+    return $headers;
+}
+
 $passed = 0;
 $failed = 0;
 
@@ -134,6 +152,22 @@ echo "\n=== Test HTTP — sessions, cookies et CSRF ===\n";
 
 [$code] = get_call("{$base}?action=health", $jar);
 expect('health répond 200', $code === 200);
+
+// En-têtes HTTP de sécurité (CSP, nosniff, frame, referrer, cache).
+$hdr = http_headers("{$base}?action=health");
+expect('En-tête Content-Security-Policy présent', !empty($hdr['content-security-policy'] ?? ''));
+expect('CSP restreint aux ressources locales (default-src \'self\')',
+    str_contains($hdr['content-security-policy'] ?? '', "default-src 'self'"));
+expect('En-tête X-Content-Type-Options: nosniff', ($hdr['x-content-type-options'] ?? '') === 'nosniff');
+expect('En-tête X-Frame-Options: DENY', strtoupper($hdr['x-frame-options'] ?? '') === 'DENY');
+expect('En-tête Referrer-Policy: no-referrer', ($hdr['referrer-policy'] ?? '') === 'no-referrer');
+expect('En-tête Cache-Control: no-store', str_contains(strtolower($hdr['cache-control'] ?? ''), 'no-store'));
+
+// Le cookie de session doit être HttpOnly et SameSite=Lax (via la réponse auth/csrf).
+$hdrCookie = http_headers("{$base}?action=auth/csrf");
+$cookie = strtolower($hdrCookie['set-cookie'] ?? '');
+expect('Cookie de session HttpOnly', str_contains($cookie, 'httponly'));
+expect('Cookie de session SameSite=Lax', str_contains($cookie, 'samesite=lax'));
 
 [$code] = get_call("{$base}?action=profile", $jar);
 expect('profile sans session => 401', $code === 401, "HTTP {$code}");

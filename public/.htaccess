@@ -1,0 +1,20 @@
+# Durcissement HTTP au niveau Apache (public/ est la racine documentaire).
+# Applicable lorsque AllowOverride est autorisé ; sinon les directives sont
+# simplement ignorées sans casser l'application. En développement via le serveur
+# intégré PHP (php -S), ce fichier n'est pas pris en compte : la protection des
+# réponses API est assurée dans src/Security.php.
+
+# ---------- En-têtes de sécurité ----------
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set Referrer-Policy "no-referrer"
+    Header set Cache-Control "no-store"
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+    Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
+
+# ---------- Protection des fichiers sensibles ----------
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

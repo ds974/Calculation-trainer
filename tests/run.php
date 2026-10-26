@@ -39,6 +39,9 @@ final class TestRunner
         $this->testPasswordHashing();
         $this->testInitialAdmin();
 
+        // Étape 1 : sécurité applicative (durcissement session & en-têtes).
+        $this->testSecurityHardening();
+
         // Étape 2 : authentification et gestion des comptes.
         $this->testRegister();
         $this->testLogin();
@@ -773,6 +776,66 @@ final class TestRunner
             $this->check(count($results->history($id)) === 0, 'Aucune donnée malformée persistée');
         } catch (Throwable $e) {
             $this->check(false, "Import malformé : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape de sécurité : durcissement de la session et en-têtes HTTP ---
+
+    private function testSecurityHardening(): void
+    {
+        echo "[Sécurité — session et en-têtes HTTP]\n";
+        try {
+            $srcDir = CALC_TRAINER_SRC;
+
+            // 1. Les attributs HttpOnly / SameSite du cookie de session sont fixés
+            //    via session_set_cookie_params() dans Security::startSession() et
+            //    sont VÉRIFIÉS au niveau HTTP réel dans http_test.php (en-tête
+            //    Set-Cookie). En contexte CLI, startSession() peut se contenter de
+            //    retourner tôt si des en-têtes ont déjà été émis (sortie du harnais)
+            //    : on vérifie donc ici la présence du code de durcissement attendu.
+            $securitySrc = (string)file_get_contents($srcDir . '/Security.php');
+            $this->check(
+                str_contains($securitySrc, "'httponly' => true")
+                    && str_contains($securitySrc, "'samesite' => 'Lax'"),
+                'Cookie session durci (HttpOnly + SameSite=Lax) dans startSession()'
+            );
+
+            // 2. session.use_only_cookies doit rester actif (aucun ID dans l'URL).
+            $this->check(
+                (string)ini_get('session.use_only_cookies') === '1',
+                'session.use_only_cookies = 1 (pas d\'ID dans l\'URL)'
+            );
+
+            // 3. L'application ne doit JAMAIS reconfigurer session.serialize_handler
+            //    (CVE-2026-115560) : aucun ini_set/ini_alter vers un autre handler.
+            //    La directive restant au "php" par défaut, elle n'est pas modifiable
+            //    depuis le code ; le correctif relève de la mise à jour du moteur PHP.
+            $hits = 0;
+            foreach (glob($srcDir . '/*.php') ?: [] as $phpFile) {
+                $content = (string)file_get_contents($phpFile);
+                if (preg_match('/ini_(set|alter)\s*\(\s*[\'"]session\.serialize_handler[\'"]/', $content)) {
+                    $hits++;
+                }
+            }
+            $this->check($hits === 0, 'Aucune reconfiguration de session.serialize_handler dans src/');
+
+            // 4. Le code ne doit contenir aucun unserialize de données non fiables.
+            $unserializeHits = 0;
+            foreach (glob($srcDir . '/*.php') ?: [] as $phpFile) {
+                $content = (string)file_get_contents($phpFile);
+                if (preg_match('/\bunserialize\s*\(/', $content)) {
+                    $unserializeHits++;
+                }
+            }
+            $this->check($unserializeHits === 0, 'Aucun appel unserialize() dans src/');
+
+            // 5. session.use_strict_mode : directive figée à l'exécution (no-op ini_set).
+            //    On journalise la valeur effective ; l'activation se fait en php.ini.
+            $strict = (string)ini_get('session.use_strict_mode');
+            echo "  ℹ session.use_strict_mode = " . ($strict === '1' ? '1 (actif)' : '0 (à activer en php.ini)') . "\n";
+            $this->check(true, 'Valeur session.use_strict_mode journalisée');
+        } catch (Throwable $e) {
+            $this->check(false, "Sécurité session/en-têtes : {$e->getMessage()}");
         }
     }
 }

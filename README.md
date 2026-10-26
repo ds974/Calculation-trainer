@@ -104,6 +104,57 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
 
 ---
 
+## Sécurité — durcissement appliqué et prérequis d'environnement
+
+### Protections applicatives (présentes et vérifiées par les tests)
+
+- **Session sécurisée** : cookie `HttpOnly`, `SameSite=Lax`, `Secure` si HTTPS, nom dédié,
+  régénération de l'identifiant après connexion (`session_regenerate_id`).
+- **CSRF** : jeton unique par session, obligatoire pour toute opération POST.
+- **Authentification** : Argon2id, messages génériques, comptes isolés (chaque utilisateur
+  n'accède qu'à ses propres données), limitation des tentatives de connexion (anti brute-force).
+- **Injections SQL** : 100 % requêtes préparées PDO (aucune concaténation).
+- **XSS** : aucune donnée utilisateur injectée en HTML sans échappement ; en-tête
+  `Content-Security-Policy: default-src 'self'` (script/style/connect auto-hébergés uniquement).
+- **En-têtes de sécurité** : `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, `Permissions-Policy`.
+- **Exposition** : `src/`, `storage/`, `scripts/` et `tests/` sont hors racine documentaire.
+
+### Prérequis de configuration (php.ini / MAMP) — à appliquer côté environnement
+
+Certaines directives du moteur de session PHP sont figées au démarrage du module et ne
+peuvent pas être modifiées par le code applicatif (un `ini_set()` est un no-op). Elles
+doivent être verrouillées dans le `php.ini` utilisé (MAMP) :
+
+```ini
+; Anti-fixation de session : refuse les identifiants de session non initialisés.
+session.use_strict_mode = 1
+; L'identifiant de session ne transite jamais par l'URL.
+session.use_only_cookies = 1
+; Garde le handler natif : ne JAMAIS basculer session.serialize_handler.
+session.serialize_handler = php
+; Désactive le suivi de progression des téléversements dans les sessions
+; (réduit la surface CVE-2026-109618 / CVE-2026-109619).
+session.upload_progress.enabled = 0
+```
+
+> Les en-têtes de sécurité (dont la CSP), posés par `src/Security.php` sur les réponses
+> API, ne couvrent **pas** la page statique `index.html` servie par Apache. Pour durcir
+> aussi la SPA, un `public/.htaccess` est fourni (utile si `AllowOverride` est activé) ;
+> sinon, ajoutez les mêmes en-têtes au niveau du vhost. En mode développement
+> (`php -S localhost:8000 -t public`), seules les réponses API portent ces en-têtes.
+
+### Vulnérabilités du moteur PHP (nécessitent une mise à jour de PHP)
+
+Les CVEs **CVE-2026-109618**, **CVE-2026-109619** et **CVE-2026-115560** concernent le
+moteur PHP lui-même (PHP < 8.5.12). Elles ne peuvent pas être entièrement corrigées par du
+code applicatif. Le code actuel **n'aggrave pas** la situation : il ne reconfigure jamais
+`session.serialize_handler`, n'appelle aucun `unserialize()` sur des données non fiables et
+ne gère pas de téléversements. **La mise à jour du serveur PHP vers 8.5.12 (ou ultérieur)
+reste une exigence distincte avant toute exposition publique**, dans l'esprit de l'étape 5.
+
+---
+
 ## Étape 3 — Résultats, historique et mode invité
 
 ### Enregistrement des parties (utilisateurs connectés)

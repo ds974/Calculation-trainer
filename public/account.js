@@ -188,7 +188,7 @@ const AccountUI = (() => {
     const login = document.createElement("div");
     login.innerHTML = "<strong>Identifiant :</strong> " + escapeHtml(user.login || "");
     const role = document.createElement("div");
-    role.innerHTML = "<strong>Rôle :</strong> " + (user.role || "user");
+    role.innerHTML = "<strong>Rôle :</strong> " + escapeHtml(user.role || "user");
     const since = document.createElement("div");
     since.innerHTML = "<strong>Inscrit le :</strong> " + formatDate(user.created_at || "");
     wrap.append(login, role, since);

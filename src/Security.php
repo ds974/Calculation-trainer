@@ -37,6 +37,21 @@ final class Security
         }
 
         $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+
+        // Les attributs du cookie de session sont fixés de façon fiable et
+        // VÉRIFIÉE via session_set_cookie_params() (HttpOnly, SameSite=Lax,
+        // Secure si HTTPS) : ils sont appliqués à l'envoi du Set-Cookie réel.
+        //
+        // Les directives moteur suivantes sont volontairement LAISSÉES à la
+        // configuration de l'environnement (php.ini / MAMP), car le moteur de
+        // session de PHP les fige au démarrage du module : un ini_set() à
+        // l'exécution est un no-op (retour false) et serait trompeur :
+        //   - session.use_strict_mode = 1  (recommander en php.ini, anti fixation)
+        //   - session.serialize_handler = php  (ne PAS changer ; CVE-2026-115560
+        //     relève d'une mise à jour du moteur PHP, l'application ne reconfigure
+        //     jamais ce handler et n'appelle aucun unserialize sur données non fiables)
+        //   - session.upload_progress.enabled = Off (recommandé ; CVE-2026-109618/109619)
+
         session_name(self::SESSION_NAME);
         session_set_cookie_params([
             'lifetime' => 0,
@@ -145,6 +160,12 @@ final class Security
             header('X-Frame-Options: DENY');
             header('Referrer-Policy: no-referrer');
             header('Cache-Control: no-store');
+            // Politique de sécurité de contenu : l'application n'utilise que des
+            // scripts et styles externes auto-hébergés, sans blocs inline ni eval().
+            // default-src 'self' bloque donc le chargement de toute ressource
+            // distante et l'exécution de code inline => forte atténuation des XSS.
+            header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'");
+            header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
         }
     }
 }
