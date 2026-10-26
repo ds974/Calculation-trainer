@@ -15,7 +15,6 @@ declare(strict_types=1);
  *  - auth/login            (POST) : connexion (création de la session).
  *  - auth/logout           (POST) : déconnexion (destruction de la session).
  *  - profile               (GET)  : profil de l'utilisateur connecté.
- *  - profile/update        (POST) : modification de l'adresse e-mail.
  *  - profile/password      (POST) : modification du mot de passe.
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
@@ -24,6 +23,12 @@ declare(strict_types=1);
  * Sécurité : session HttpOnly/SameSite=Lax/Secure (si HTTPS), jeton CSRF
  * obligatoire pour toute opération POST, requêtes préparées, Argon2id,
  * messages génériques ne révélant pas l'existence d'un compte.
+ *
+ * Gestion des e-mails : entièrement supprimée. La colonne `email` de la table
+ * `users` est conservée (nullable) pour éviter une restructuration, mais :
+ *  - une migration idempotente force `email = NULL` pour toutes les lignes ;
+ *  - le champ `email` éventuellement transmis par un ancien client est ignoré ;
+ *  - aucune réponse API ne renvoie le champ `email`.
  */
 
 require dirname(__DIR__, 2) . '/src/bootstrap.php';
@@ -52,6 +57,11 @@ try {
     $resultRepository = new ResultRepository($db->pdo());
     $results = new ResultService($db->pdo(), $resultRepository);
 
+    // Migration idempotente (non destructive) : efface toute valeur d'e-mail
+    // résiduelle en base. Conserve les identifiants, mots de passe hachés,
+    // rôles et résultats. Exécutable à chaque requête sans effet de bord.
+    $db->pdo()->exec('UPDATE users SET email = NULL WHERE email IS NOT NULL');
+
     switch ($action) {
         case 'health':
             Response::success([
@@ -72,7 +82,7 @@ try {
             $user = $auth->register([
                 'login'    => (string)($parsed['login'] ?? ''),
                 'password' => (string)($parsed['password'] ?? ''),
-                'email'    => (string)($parsed['email'] ?? ''),
+                // Le champ 'email' d'un ancien client est volontairement ignoré.
             ]);
             Response::success(['user' => $user], 201);
             break;
@@ -98,16 +108,6 @@ try {
                 Response::error('Authentification requise.', 401);
             }
             Response::success(['user' => $user]);
-            break;
-
-        case 'profile/update':
-            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
-            $user = $auth->currentUser();
-            if ($user === null) {
-                Response::error('Authentification requise.', 401);
-            }
-            $auth->updateEmail((int)$user['id'], (string)($parsed['email'] ?? ''));
-            Response::success(['user' => $auth->currentUser()]);
             break;
 
         case 'profile/password':

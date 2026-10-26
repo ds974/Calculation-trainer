@@ -71,7 +71,7 @@ en dur ni stocké en clair.
 php scripts/initialize.php
 ```
 
-- Login : `admin` · E-mail : `admin@fake.fr` · Rôle : `admin`.
+- Login : `admin` · Rôle : `admin`.
 - Le mot de passe saisi doit comporter **au moins 10 caractères**.
 - Le script **refuse** de recréer ou d'écraser un administrateur déjà existant.
 - Si le mode **WAL** ne peut pas être activé, le script le **signale explicitement**
@@ -154,14 +154,16 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
 
 - **Session côté serveur** : aucune logique d'authentification parallèle ; on
   réutilise les routes PHP existantes (`auth/csrf`, `auth/login`, `auth/register`,
-  `auth/logout`, `profile`, `profile/update`, `profile/password`, `result/import`).
+  `auth/logout`, `profile`, `profile/password`, `result/import`).
 - **Cookies sécurisés** gérés par PHP (`SameSite=Lax` + `HttpOnly`). Aucun mot de
   passe ni cookie de session n'est stocké dans `localStorage` ; seul l'utilisateur
   public et le jeton CSRF sont gardés **en mémoire** (jamais réhydratés au rechargement).
 - Au chargement / à l'actualisation, on récupère le jeton CSRF puis le profil, et on
   branche `GuestHistoryV12.setSession({ token, user })` (ou `null`) selon l'état.
-- Connexion, inscription, profil (e-mail, mot de passe) avec messages d'erreur
+- **Connexion, inscription, profil (mot de passe)** avec messages d'erreur
   explicites (contraintes : identifiant 3-40 alphanumériques/`_`, mot de passe ≥ 10).
+  Les comptes reposent uniquement sur un **identifiant unique** et un **mot de passe
+  de 10 caractères minimum** ; aucune adresse e-mail n'est gérée.
 - **Import volontaire** des parties invitées depuis « Mon compte », avec
   **confirmation explicite** (`confirm()`), affichage du nombre importé / déjà
   présent (`doublon`), et conservation des données locales en cas d'échec.

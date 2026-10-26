@@ -51,23 +51,6 @@ final class Validator
     }
 
     /**
-     * Valide une adresse e-mail (facultative : la chaîne vide est acceptée).
-     *
-     * @return string|null message d'erreur, ou null si valide.
-     */
-    public static function email(?string $email): ?string
-    {
-        $email = trim((string)$email);
-        if ($email === '') {
-            return null; // facultative
-        }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return 'L\'adresse e-mail n\'est pas valide.';
-        }
-        return null;
-    }
-
-    /**
      * Valide un rôle utilisateur.
      *
      * @return true si le rôle est valide (user ou admin).

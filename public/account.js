@@ -21,7 +21,7 @@ const AccountUI = (() => {
   const API_BASE = "api/index.php";
 
   // État conservé UNIQUEMENT EN MÉMOIRE (aucune donnée sensible en localStorage).
-  let user = null; // utilisateur public { id, login, email, role, created_at }
+  let user = null; // utilisateur public { id, login, role, created_at }
   let csrfToken = null;
   let accountReady = false;
 
@@ -194,9 +194,6 @@ const AccountUI = (() => {
     wrap.append(login, role, since);
     summary.appendChild(wrap);
 
-    const emailField = document.getElementById("emailField");
-    if (emailField) emailField.value = user.email || "";
-
     renderImportBlock();
   }
 
@@ -300,7 +297,6 @@ const AccountUI = (() => {
   async function handleRegister() {
     clearFeedback("registerFeedback");
     const login = (document.getElementById("registerLogin").value || "").trim();
-    const email = (document.getElementById("registerEmail").value || "").trim();
     const password = document.getElementById("registerPassword").value;
     const confirm = document.getElementById("registerPasswordConfirm").value;
 
@@ -320,14 +316,10 @@ const AccountUI = (() => {
       setFeedback("registerFeedback", "Les deux mots de passe ne correspondent pas.", "error");
       return;
     }
-    if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setFeedback("registerFeedback", "L’adresse e-mail n’est pas valide.", "error");
-      return;
-    }
 
     const btn = document.getElementById("registerSubmit");
     setBusy(btn, true, "Inscription…");
-    const res = await api("auth/register", { login, password, email });
+    const res = await api("auth/register", { login, password });
     setBusy(btn, false);
 
     if (!res.ok) {
@@ -353,35 +345,6 @@ const AccountUI = (() => {
   }
 
   // ------------------------------------------------------------------- Profile
-
-  async function handleEmailUpdate() {
-    clearFeedback("emailFeedback");
-    if (!user) return;
-    const email = (document.getElementById("emailField").value || "").trim();
-    if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setFeedback("emailFeedback", "L’adresse e-mail n’est pas valide.", "error");
-      return;
-    }
-
-    const btn = document.getElementById("emailSubmit");
-    setBusy(btn, true, "Enregistrement…");
-    const res = await api("profile/update", { email });
-    setBusy(btn, false);
-
-    if (!res.ok) {
-      if (isAuthError(res)) {
-        await handleSessionExpired("Votre session a expiré. Reconnectez-vous.");
-        return;
-      }
-      setFeedback("emailFeedback", res.error || "Impossible d’enregistrer l’e-mail.", "error");
-      return;
-    }
-
-    user = res.data && res.data.user ? res.data.user : user;
-    syncGuestSession();
-    renderAccountScreen();
-    setFeedback("emailFeedback", "Adresse e-mail mise à jour avec succès.", "success");
-  }
 
   async function handlePasswordChange(form) {
     clearFeedback("passwordFeedback");
@@ -521,9 +484,6 @@ const AccountUI = (() => {
       } else if (form.id === "registerForm") {
         event.preventDefault();
         handleRegister();
-      } else if (form.id === "emailForm") {
-        event.preventDefault();
-        handleEmailUpdate();
       } else if (form.id === "passwordForm") {
         event.preventDefault();
         handlePasswordChange(form);

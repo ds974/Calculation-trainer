@@ -46,6 +46,7 @@ final class TestRunner
         $this->testAuthorization();
         $this->testCsrf();
         $this->testUnauthenticatedAccess();
+        $this->testEmailMigration();
 
         // Étape 3 : enregistrement des résultats, historique et import invité.
         $this->testResultSave();
@@ -127,7 +128,6 @@ final class TestRunner
             // Création du premier utilisateur.
             $id1 = $repo->create([
                 'login' => 'TestUser',
-                'email' => 't@example.fr',
                 'password' => 'motdepasse10',
                 'role' => 'user',
             ]);
@@ -137,7 +137,6 @@ final class TestRunner
             try {
                 $repo->create([
                     'login' => 'testuser', // casse différente
-                    'email' => '',
                     'password' => 'autremotdepasse10',
                     'role' => 'user',
                 ]);
@@ -166,7 +165,6 @@ final class TestRunner
             $repo = new UserRepository($db->pdo());
             $id = $repo->create([
                 'login' => 'hashme',
-                'email' => '',
                 'password' => 'monsecret012345',
                 'role' => 'user',
             ]);
@@ -199,7 +197,6 @@ final class TestRunner
 
             $id = $repo->create([
                 'login' => 'admin',
-                'email' => 'admin@fake.fr',
                 'password' => 'adminmotdepasse123',
                 'role' => 'admin',
             ]);
@@ -209,7 +206,6 @@ final class TestRunner
             try {
                 $repo->create([
                     'login' => 'admin',
-                    'email' => 'autre@fake.fr',
                     'password' => 'unautremotdepasse123',
                     'role' => 'admin',
                 ]);
@@ -237,15 +233,30 @@ final class TestRunner
             $db = new Database($this->tmpRoot);
             $auth = new AuthService($db->pdo(), new UserRepository($db->pdo()));
 
-            // Inscription valide.
+            // Inscription valide, sans e-mail.
             $u = $auth->register([
                 'login'    => 'alice',
                 'password' => 'unMotDePasseSûr123',
-                'email'    => 'alice@example.com',
             ]);
-            $this->check(($u['login'] ?? '') === 'alice', 'Inscription valide (compte créé)');
+            $this->check(($u['login'] ?? '') === 'alice', 'Inscription valide sans e-mail (compte créé)');
             $this->check(($u['role'] ?? '') === 'user', 'Rôle par défaut = user');
             $this->check(!isset($u['password_hash']), 'Empreinte mot de passe non exposée');
+            $this->check(!array_key_exists('email', $u), 'Réponse d\'inscription sans champ e-mail');
+
+            // Un ancien client transmet encore un e-mail : il doit être IGNORÉ
+            // (compte créé, mais aucun e-mail stocké).
+            $legacy = $auth->register([
+                'login'    => 'legacy_user',
+                'password' => 'unMotDePasseSûr456',
+                'email'    => 'legacy@example.com', // champ résiduel non géré
+            ]);
+            $this->check(($legacy['login'] ?? '') === 'legacy_user', 'Inscription avec e-mail transmis : compte créé');
+            $this->check(!array_key_exists('email', $legacy), 'Aucun e-mail dans la réponse (champ ignoré)');
+            $legacyRow = (new UserRepository($db->pdo()))->findByLogin('legacy_user');
+            $this->check(
+                $legacyRow !== null && $legacyRow['email'] === null,
+                'Inscription avec e-mail transmis : e-mail non stocké (colonne NULL)'
+            );
 
             // Identifiant déjà utilisé.
             try {
@@ -266,17 +277,19 @@ final class TestRunner
                 $this->check(true, 'Refus des mots de passe trop courts');
             }
 
-            // E-mail invalide.
-            try {
-                $auth->register([
-                    'login' => 'charlie',
-                    'password' => 'unMotDePasseSûr789',
-                    'email' => 'pas-un-email',
-                ]);
-                $this->check(false, 'Refus d\'une adresse e-mail invalide');
-            } catch (InvalidArgumentException) {
-                $this->check(true, 'Refus d\'une adresse e-mail invalide');
-            }
+            // Un ancien client transmet un e-mail invalide : comme l'e-mail est
+            // entièrement ignoré, l'inscription doit quand même réussir.
+            $charlie = $auth->register([
+                'login'    => 'charlie',
+                'password' => 'unMotDePasseSûr789',
+                'email'    => 'pas-un-email',
+            ]);
+            $this->check(($charlie['login'] ?? '') === 'charlie', 'E-mail invalide transmis ignoré : inscription réussie');
+            $charlieRow = (new UserRepository($db->pdo()))->findByLogin('charlie');
+            $this->check(
+                $charlieRow !== null && $charlieRow['email'] === null,
+                'E-mail invalide transmis : non stocké (colonne NULL)'
+            );
 
             // Login trop court.
             try {
@@ -309,7 +322,6 @@ final class TestRunner
             $auth->register([
                 'login' => 'dave',
                 'password' => 'unMotDePasseSûr123',
-                'email' => '',
             ]);
 
             // Connexion avec le bon mot de passe.
@@ -379,30 +391,20 @@ final class TestRunner
             $u = $auth->register([
                 'login' => 'erin',
                 'password' => 'unMotDePasseSûr123',
-                'email' => '',
             ]);
             $id = (int)$u['id'];
 
-            // Modification de l'adresse e-mail.
-            $auth->updateEmail($id, 'erin@example.org');
-            $afterEmail = $repo->findById($id);
+            // L'e-mail n'est plus modifiable : le service ne doit exposer aucune
+            // méthode de modification d'e-mail (la route API correspondante a été retirée).
             $this->check(
-                ($afterEmail['email'] ?? '') === 'erin@example.org',
-                'Modification de l\'adresse e-mail'
+                !method_exists(AuthService::class, 'updateEmail'),
+                'Aucune méthode de modification d\'e-mail exposée par le service'
             );
-
-            // E-mail vide => réinitialisé à NULL.
-            $auth->updateEmail($id, '');
-            $afterEmpty = $repo->findById($id);
-            $this->check((string)($afterEmpty['email'] ?? '') === '', 'E-mail peut être effacé');
-
-            // E-mail invalide refusé.
-            try {
-                $auth->updateEmail($id, 'invalide');
-                $this->check(false, 'Refus d\'un e-mail invalide lors d\'une modification');
-            } catch (InvalidArgumentException) {
-                $this->check(true, 'Refus d\'un e-mail invalide lors d\'une modification');
-            }
+            $afterReg = $repo->findById($id);
+            $this->check(
+                $afterReg !== null && $afterReg['email'] === null,
+                'Inscription sans e-mail : colonne email à NULL'
+            );
 
             // Changement de mot de passe : ancien incorrect refusé.
             try {
@@ -512,6 +514,52 @@ final class TestRunner
         }
     }
 
+    // --- Étape 2 : migration de suppression des e-mails (non destructive) ---
+
+    private function testEmailMigration(): void
+    {
+        echo "[Migration e-mails]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+
+            // On simule une base pré-existante contenant un e-mail et un résultat.
+            $id = $repo->create([
+                'login'    => 'mig_user',
+                'password' => 'motdepasse10',
+                'role'     => 'user',
+            ]);
+            // Réinjecte un e-mail comme s'il datait d'avant la migration.
+            $pdo->prepare('UPDATE users SET email = :email WHERE id = :id')
+                ->execute(['email' => 'mig@example.fr', 'id' => $id]);
+            $hashBefore = (string)$pdo->query("SELECT password_hash FROM users WHERE id = {$id}")->fetchColumn();
+            $roleBefore = (string)$pdo->query("SELECT role FROM users WHERE id = {$id}")->fetchColumn();
+            $results->save($id, 'multiplication', 8);
+
+            // Première exécution de la migration.
+            $pdo->exec('UPDATE users SET email = NULL WHERE email IS NOT NULL');
+
+            $row = $pdo->query("SELECT * FROM users WHERE id = {$id}")->fetch();
+            $this->check($row !== false, 'Utilisateur conservé après migration');
+            $this->check($row['email'] === null, 'E-mail effacé après migration (colonne NULL)');
+            $this->check((string)$row['role'] === $roleBefore, 'Rôle préservé après migration');
+            $this->check((string)$row['password_hash'] === $hashBefore, 'Mot de passe haché préservé après migration');
+            $this->check(
+                (int)$pdo->query("SELECT COUNT(*) FROM results WHERE user_id = {$id}")->fetchColumn() === 1,
+                'Résultats conservés après migration'
+            );
+
+            // Seconde exécution : la migration doit rester idempotente et sans erreur.
+            $pdo->exec('UPDATE users SET email = NULL WHERE email IS NOT NULL');
+            $row2 = $pdo->query("SELECT email FROM users WHERE id = {$id}")->fetch();
+            $this->check($row2 !== false && $row2['email'] === null, 'Migration ré-exécutable sans erreur (idempotente)');
+        } catch (Throwable $e) {
+            $this->check(false, "Migration e-mails : {$e->getMessage()}");
+        }
+    }
+
     // --- Étape 3 : enregistrement d'un résultat valide ---
 
     private function testResultSave(): void
@@ -524,7 +572,7 @@ final class TestRunner
             $results = new ResultService($pdo, new ResultRepository($pdo));
 
             $id = $repo->create([
-                'login' => 'save_user', 'email' => 's@ex.fr',
+                'login' => 'save_user',
                 'password' => 'motdepasse10', 'role' => 'user',
             ]);
 
@@ -558,7 +606,7 @@ final class TestRunner
             $repo = new UserRepository($pdo);
             $results = new ResultService($pdo, new ResultRepository($pdo));
             $id = $repo->create([
-                'login' => 'val_user', 'email' => '',
+                'login' => 'val_user',
                 'password' => 'motdepasse10', 'role' => 'user',
             ]);
 
@@ -629,8 +677,8 @@ final class TestRunner
             $repo = new UserRepository($pdo);
             $results = new ResultService($pdo, new ResultRepository($pdo));
 
-            $a = $repo->create(['login' => 'hist_a', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
-            $b = $repo->create(['login' => 'hist_b', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+            $a = $repo->create(['login' => 'hist_a', 'password' => 'motdepasse10', 'role' => 'user']);
+            $b = $repo->create(['login' => 'hist_b', 'password' => 'motdepasse10', 'role' => 'user']);
 
             $results->save($a, 'multiplication', 10);
             $results->save($a, 'addition', 6);
@@ -652,7 +700,7 @@ final class TestRunner
             $pdo = $db->pdo();
             $repo = new UserRepository($pdo);
             $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_imp', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+            $id = $repo->create(['login' => 'guest_imp', 'password' => 'motdepasse10', 'role' => 'user']);
 
             $items = [
                 ['guest_id' => 'v12-aaa111', 'mode' => 'multiplication', 'score' => 8, 'played_at' => '2026-01-10T08:00:00Z'],
@@ -677,7 +725,7 @@ final class TestRunner
             $pdo = $db->pdo();
             $repo = new UserRepository($pdo);
             $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_dup', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+            $id = $repo->create(['login' => 'guest_dup', 'password' => 'motdepasse10', 'role' => 'user']);
 
             $items = [
                 ['guest_id' => 'v12-ddd444', 'mode' => 'multiplication', 'score' => 9, 'played_at' => '2026-02-01T08:00:00Z'],
@@ -703,7 +751,7 @@ final class TestRunner
             $pdo = $db->pdo();
             $repo = new UserRepository($pdo);
             $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_bad', 'email' => '', 'password' => 'motdepasse10', 'role' => 'user']);
+            $id = $repo->create(['login' => 'guest_bad', 'password' => 'motdepasse10', 'role' => 'user']);
 
             // Structure globale invalide (liste associative non indexée).
             try {

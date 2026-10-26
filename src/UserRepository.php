@@ -44,7 +44,8 @@ final class UserRepository
     /**
      * Crée un nouvel utilisateur.
      *
-     * @param array<string,mixed> $data login, email, password (clair), role.
+     * @param array<string,mixed> $data login, password (clair), role.
+     *        L'e-mail n'est plus géré : la colonne `email` reste à NULL.
      * @return int l'identifiant du nouvel utilisateur.
      * @throws RuntimeException si le login est déjà pris.
      */
@@ -61,11 +62,10 @@ final class UserRepository
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO users (login, email, password_hash, role)
-             VALUES (:login, :email, :hash, :role)'
+             VALUES (:login, NULL, :hash, :role)'
         );
         $stmt->execute([
             'login' => (string)$data['login'],
-            'email' => $data['email'] !== '' ? (string)$data['email'] : null,
             'hash'  => $hash,
             'role'  => (string)($data['role'] ?? 'user'),
         ]);
@@ -79,15 +79,6 @@ final class UserRepository
     public function verifyPassword(array $user, string $plainPassword): bool
     {
         return password_verify($plainPassword, (string)$user['password_hash']);
-    }
-
-    /**
-     * Met à jour l'adresse e-mail d'un utilisateur.
-     */
-    public function updateEmail(int $userId, ?string $email): void
-    {
-        $stmt = $this->pdo->prepare('UPDATE users SET email = :email WHERE id = :id');
-        $stmt->execute(['email' => $email, 'id' => $userId]);
     }
 
     /**

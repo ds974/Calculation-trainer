@@ -11,7 +11,7 @@ declare(strict_types=1);
  * Comportement :
  *  - crée le schéma SQLite s'il est absent (via Database) ;
  *  - signale explicitement si WAL n'est PAS actif ;
- *  - crée le compte administrateur initial (login "admin", email "admin@fake.fr",
+ *  - crée le compte administrateur initial (login "admin",
  *    rôle "admin") uniquement s'il n'existe pas déjà ;
  *  - le mot de passe est SAISI interactivement, en mode silencieux, et n'est
  *    JAMAIS stocké ni affiché en clair (haché Argon2id côté application).
@@ -71,14 +71,12 @@ final class InitializerCLI
 
         $userId = $repo->create([
             'login'        => 'admin',
-            'email'        => 'admin@fake.fr',
             'password'     => $password,
             'role'         => 'admin',
         ]);
 
         echo "\n✔ Administrateur initial créé (id #" . $userId . ").\n";
         echo "  Login  : admin\n";
-        echo "  E-mail : admin@fake.fr\n";
         echo "  Rôle   : admin\n";
         echo "  Le mot de passe n'est pas stocké en clair (empreinte Argon2id en base).\n\n";
         echo "Initialisation terminée avec succès.\n";

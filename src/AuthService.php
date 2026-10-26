@@ -36,7 +36,8 @@ final class AuthService
     /**
      * Inscription d'un nouvel utilisateur.
      *
-     * @param array<string,mixed> $data login, password, email (facultatif).
+     * @param array<string,mixed> $data login, password (et optionnellement un
+     *        champ `email` résiduel d'un ancien client, désormais IGNORÉ).
      * @return array<string,mixed> l'utilisateur public (sans empreinte).
      * @throws InvalidArgumentException si validation ou unicité échouée.
      */
@@ -44,12 +45,12 @@ final class AuthService
     {
         $login = (string)($data['login'] ?? '');
         $password = (string)($data['password'] ?? '');
-        $email = (string)($data['email'] ?? '');
+        // L'e-mail n'est plus géré : même si un ancien client le transmet,
+        // il est ignoré et jamais stocké (la colonne reste à NULL).
 
         // Validation côté serveur.
         $err = Validator::login($login)
-            ?? Validator::password($password)
-            ?? Validator::email($email);
+            ?? Validator::password($password);
         if ($err !== null) {
             throw new InvalidArgumentException($err);
         }
@@ -62,7 +63,6 @@ final class AuthService
 
         $id = $this->users->create([
             'login'    => $login,
-            'email'    => $email,
             'password' => $password,
             'role'     => 'user',
         ]);
@@ -130,21 +130,6 @@ final class AuthService
     }
 
     /**
-     * Met à jour l'adresse e-mail de l'utilisateur connecté.
-     *
-     * @throws InvalidArgumentException si l'e-mail est invalide.
-     */
-    public function updateEmail(int $userId, string $email): void
-    {
-        $err = Validator::email($email);
-        if ($err !== null) {
-            throw new InvalidArgumentException($err);
-        }
-        $email = trim($email);
-        $this->users->updateEmail($userId, $email !== '' ? $email : null);
-    }
-
-    /**
      * Modifie le mot de passe, après vérification de l'ancien.
      *
      * @throws RuntimeException si l'ancien mot de passe est incorrect.
@@ -192,7 +177,6 @@ final class AuthService
         return [
             'id'         => (int)$row['id'],
             'login'      => (string)$row['login'],
-            'email'      => $row['email'] !== null ? (string)$row['email'] : '',
             'role'       => (string)$row['role'],
             'created_at' => (string)$row['created_at'],
         ];

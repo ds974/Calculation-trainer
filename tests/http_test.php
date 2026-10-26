@@ -143,16 +143,22 @@ $csrf = json_decode($csrfBody, true);
 $token = is_array($csrf) ? (string)($csrf['data']['token'] ?? '') : '';
 expect('auth/csrf renvoie un jeton', $code === 200 && $token !== '');
 
-[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'alice', 'password' => 'secretpass123', 'email' => 'alice@ex.fr'], $jar);
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'alice', 'password' => 'secretpass123'], $jar);
 expect('register sans jeton CSRF => 403', $code === 403, "HTTP {$code}");
 
-[$code, $regBody] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'alice', 'password' => 'secretpass123', 'email' => 'alice@ex.fr', 'csrf_token' => $token], $jar);
+[$code, $regBody] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'alice', 'password' => 'secretpass123', 'csrf_token' => $token], $jar);
 $reg = json_decode($regBody, true);
 expect('register avec jeton CSRF => 201', $code === 201 && isset($reg['data']['user']['login']), "HTTP {$code}");
+expect('réponse register sans champ e-mail', !is_array($reg['data']['user'] ?? null) || !array_key_exists('email', $reg['data']['user']));
+
+// Un ancien client transmet encore un e-mail : il est ignoré, pas d'erreur.
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'legacy_http', 'password' => 'secretpass123', 'email' => 'legacy@ex.fr', 'csrf_token' => $token], $jar);
+expect('register avec e-mail transmit (ancien client) => 201, ignoré', $code === 201, "HTTP {$code}");
 
 [$code, $loginBody] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'alice', 'password' => 'secretpass123', 'csrf_token' => $token], $jar);
 $login = json_decode($loginBody, true);
 expect('login correct => 200', $code === 200 && isset($login['data']['user']['login']), "HTTP {$code}");
+expect('réponse login sans champ e-mail', !is_array($login['data']['user'] ?? null) || !array_key_exists('email', $login['data']['user']));
 
 [$code] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'alice', 'password' => 'mauvais-mdp', 'csrf_token' => $token], $jar);
 expect('login mauvais mot de passe => 401', $code === 401, "HTTP {$code}");
@@ -160,6 +166,11 @@ expect('login mauvais mot de passe => 401', $code === 401, "HTTP {$code}");
 [$code, $profBody] = get_call("{$base}?action=profile", $jar);
 $prof = json_decode($profBody, true);
 expect('profile authentifié => 200', $code === 200 && isset($prof['data']['user']), "HTTP {$code}");
+expect('réponse profile sans champ e-mail', !is_array($prof['data']['user'] ?? null) || !array_key_exists('email', $prof['data']['user']));
+
+// La route de modification d'e-mail a été supprimée : elle répond "action inconnue".
+[$code] = http_call('POST', $base, ['action' => 'profile/update', 'email' => 'nouveau@ex.fr', 'csrf_token' => $token], $jar);
+expect('profile/update supprimée => 404 (action inconnue)', $code === 404, "HTTP {$code}");
 
 $hashed = is_array($prof) ? (string)($prof['data']['user']['password_hash'] ?? '') : 'x';
 expect('réponse profil sans empreinte mot de passe', $hashed === '');
@@ -260,7 +271,7 @@ $jarBob = sys_get_temp_dir() . "/calc_trainer_jar_bob_{$port}.txt";
 [$code, $csrfBodyBob] = get_call("{$base}?action=auth/csrf", $jarBob);
 $csrfBob = json_decode($csrfBodyBob, true);
 $tokenBob = is_array($csrfBob) ? (string)($csrfBob['data']['token'] ?? '') : '';
-[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'bob', 'password' => 'secretpass123', 'email' => 'bob@ex.fr', 'csrf_token' => $tokenBob], $jarBob);
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'bob', 'password' => 'secretpass123', 'csrf_token' => $tokenBob], $jarBob);
 expect('register bob => 201', $code === 201, "HTTP {$code}");
 [$code, $logBob] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'bob', 'password' => 'secretpass123', 'csrf_token' => $tokenBob], $jarBob);
 $logBobJ = json_decode($logBob, true);
