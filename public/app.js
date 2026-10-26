@@ -35,7 +35,7 @@ const QUESTION_COUNT = 10;
 const DEFAULT_CONFIG = {
   mode: "mult",
   timePerQuestion: 5,
-  mult: { tables: [1,2,3,4,5,6,7,8,9,10] },
+  mult: { tables: [2,3,4,5,6,7,8,9] },
   add: { min: 1, max: 20 }
 };
 
@@ -386,12 +386,15 @@ function generateUniqueQuestions() {
       }
     }
   } else {
-    // Multiplication : produit cartésien des tables cochées.
+    // Multiplication : produit cartésien des tables cochées, sans duplication
     const tables = state.config.mult.tables;
     pool = [];
     for (const a of tables) {
       for (const b of tables) {
-        pool.push({ a, b, mode });
+        // Pour éviter les duplicatas comme 6×7 et 7×6, on ne prend que les couples où a <= b
+        if (a <= b) {
+          pool.push({ a, b, mode });
+        }
       }
     }
   }

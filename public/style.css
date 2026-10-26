@@ -106,6 +106,36 @@ button, input { font: inherit; }
 }
 .mission-mark svg { width: 62px; height: 62px; }
 
+/* Nouvelle disposition pour l'en-tête du compte */
+.home-screen {
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.home-header-wrapper {
+  width: 100%;
+  padding: 24px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.home-header {
+  z-index: 10;
+}
+
+.home-card {
+  width: min(660px, 100%);
+  padding: 42px 42px 46px;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  margin-top: 0;
+  align-self: center;
+}
+
 .eyebrow,
 .section-kicker {
   color: var(--primary);
@@ -128,8 +158,20 @@ h3 { margin: 32px 0 14px; }
 .subtitle { font-size: 1.08rem; margin-bottom: 32px; }
 .section-heading { margin-bottom: 8px; }
 
-.home-actions { display: grid; gap: 14px; justify-items: center; }
-.secondary-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.secondary-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 
 .btn {
   border: 0;
@@ -692,4 +734,164 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
   .keypad-key { min-height: 40px; }
   .rocket-stage { height: 118px; }
   .rocket-svg { width: 78px; height: 122px; }
+}
+
+/* ==========================================================================
+   Étape 4 — Interfaces de gestion des comptes (v12)
+   ========================================================================== */
+
+/* Barre / pastille de compte de l'accueil */
+.account-bar {
+  margin: 0 0 22px;
+  display: flex;
+  justify-content: center;
+}
+
+/* En-tête de l'écran d'accueil avec compte en haut à droite */
+.home-header {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 10;
+}
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 10px 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--soft-shadow);
+}
+.account-chip-label {
+  font-weight: 750;
+  color: var(--secondary);
+}
+.btn-small {
+  padding: 7px 14px;
+  font-size: .88rem;
+  border-radius: 999px;
+  min-width: 0;
+}
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+.btn-danger:hover { background: #9c3438; }
+
+/* Écrans connectés/inscription/profil */
+#loginScreen,
+#registerScreen,
+#accountScreen {
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+}
+.form-field label {
+  font-weight: 750;
+  font-size: .92rem;
+}
+.form-field input {
+  width: 100%;
+}
+input[type="password"] {
+  border: 1px solid #9cadb2;
+  border-radius: 11px;
+  background: #f5f8f8;
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+  font: inherit;
+}
+
+.form-message {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+  font-size: .92rem;
+  font-weight: 650;
+}
+.form-message.is-error { color: var(--danger); }
+.form-message.is-success { color: var(--success); }
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 20px;
+}
+
+/* Résumé du compte */
+.account-summary {
+  margin: 6px 0 8px;
+  padding: 16px 18px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+}
+.account-summary-inner {
+  display: grid;
+  gap: 6px;
+}
+.account-summary-inner strong { color: var(--secondary); }
+
+/* Bloc d'import des anciennes parties */
+.import-block {
+  margin: 18px 0;
+  padding: 18px 20px;
+  background: #eef6f4;
+  border: 1px solid rgba(40, 127, 121, .35);
+  border-radius: 14px;
+}
+.import-block h3 { margin: 0 0 8px; }
+.import-block .muted { margin: 6px 0 14px; }
+
+/* Toast (notifications) */
+.account-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(92vw, 560px);
+  padding: 12px 18px;
+  background: #12313f;
+  color: #eaf2f4;
+  border: 1px solid rgba(126, 217, 203, .5);
+  border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(3, 18, 28, .4);
+  font-weight: 650;
+  text-align: center;
+}
+
+@media (max-width: 650px) {
+  .form-actions { flex-direction: column; align-items: stretch; }
+  .form-actions .btn { width: 100%; }
+  .account-chip { border-radius: 16px; }
+  .account-toast { bottom: 14px; }
+}
+
+/* Amélioration de l'apparence du bouton principal */
+.btn-primary {
+  padding: 16px 32px;
+  font-size: 1.2rem;
+  font-weight: 750;
+  min-width: 240px;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(3, 18, 28, 0.18);
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(3, 18, 28, 0.24);
 }

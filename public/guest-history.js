@@ -58,10 +58,24 @@ const GuestHistoryV12 = (() => {
     }
   }
 
+  /**
+   * Clé de stockage de la trace d'imports, SCOPÉE au compte connecté.
+   * Un même navigateur pouvant être utilisé par plusieurs comptes, chaque compte
+   * possède sa propre liste d'imports déjà effectués afin de ne pas les confondre.
+   * Sans session, on retombe sur une clé générique (l'import n'a de toute façon
+   * de sens qu'avec une session).
+   */
+  function importedKeyFor() {
+    const uid = session && session.user && session.user.id != null
+      ? String(session.user.id)
+      : "";
+    return uid !== "" ? `${IMPORTED_KEY}.${uid}` : IMPORTED_KEY;
+  }
+
   /** Trace locale des guest_id déjà importés (évite de les réimporter). */
   function loadImported() {
     try {
-      const raw = localStorage.getItem(IMPORTED_KEY);
+      const raw = localStorage.getItem(importedKeyFor());
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === "object" ? new Set(parsed) : new Set();
     } catch (_e) {
@@ -71,10 +85,19 @@ const GuestHistoryV12 = (() => {
 
   function saveImported(ids) {
     try {
-      localStorage.setItem(IMPORTED_KEY, JSON.stringify([...ids]));
+      localStorage.setItem(importedKeyFor(), JSON.stringify([...ids]));
     } catch (_e) {
       /* ignore */
     }
+  }
+
+  /**
+   * Parties invitées locales encore à importer pour le compte connecté,
+   * c'est-à-dire celles dont le guest_id n'a pas encore été importé pour CE compte.
+   */
+  function pendingEntries() {
+    const importedSet = loadImported();
+    return loadAll().filter((e) => e && e.guest_id && !importedSet.has(e.guest_id));
   }
 
   /** Génère un guest_id stable pour la partie (idempotence de l'import). */
@@ -152,9 +175,7 @@ const GuestHistoryV12 = (() => {
       return { error: "not-connected" };
     }
 
-    const all = loadAll();
-    const importedSet = loadImported();
-    const pending = all.filter((e) => e && e.guest_id && !importedSet.has(e.guest_id));
+    const pending = pendingEntries();
 
     if (pending.length === 0) {
       return { imported: 0, skipped: 0 };
@@ -170,7 +191,7 @@ const GuestHistoryV12 = (() => {
     const res = await api("result/import", {
       items: pending.map((e) => ({
         guest_id: e.guest_id,
-        mode: e.mode,
+        mode: serverMode(e.mode),
         score: e.score,
         played_at: e.played_at,
       })),
@@ -180,13 +201,13 @@ const GuestHistoryV12 = (() => {
       return { error: "server", response: res };
     }
 
-    const importedNow = (res.data && res.data.imported) || 0;
-    if (importedNow > 0) {
-      const sentIds = pending.map((e) => e.guest_id);
-      const next = new Set(importedSet);
-      sentIds.forEach((id) => next.add(id));
-      saveImported(next);
-    }
+    // Le serveur a traité la demande de façon idempotente : que des parties aient
+    // été importées ou simplement reconnues comme déjà présentes, on enregistre
+    // dorénavant ces guest_id comme traités pour CE compte afin de ne pas les renvoyer.
+    const sentIds = pending.map((e) => e.guest_id);
+    const next = loadImported();
+    sentIds.forEach((id) => next.add(id));
+    saveImported(next);
 
     return { imported: res.data.imported, skipped: res.data.skipped };
   }
@@ -196,6 +217,13 @@ const GuestHistoryV12 = (() => {
     record,
     importToAccount,
     loadAll,
+    /**
+     * Nombre de parties invitées locales encore à importer pour le compte connecté.
+     * @return {number}
+     */
+    pendingCount() {
+      return pendingEntries().length;
+    },
     get hasSession() {
       return session !== null;
     },

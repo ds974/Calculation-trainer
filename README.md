@@ -19,6 +19,7 @@ calculation-trainer/
 │   ├── style.css               # Thème spatial, SVG & animations
 │   ├── app.js                  # Logique du jeu (chargé après guest-history.js)
 │   ├── guest-history.js        # Historique & import invité v12
+│   ├── account.js              # Interface compte : connexion, inscription, profil, import
 │   └── api/index.php           # Front controller des API (auth + résultats)
 ├── src/                        # NON accessible par HTTP
 │   ├── bootstrap.php           # Constantes de chemins + autoload léger
@@ -142,13 +143,31 @@ La racine documentaire est `public/` ; l'application est ensuite accessible sur
   **confirmation explicite**, envoi au serveur, et conservation d'une trace locale
   des éléments importés (pas de réimport). Aucune donnée locale n'est supprimée en
   cas d'échec. Le serveur refuse les doublons (colonne unique `guest_id`).
+- La trace d'imports est **scopée par compte** (`missionCalculMental.history.v12.imported.<id>`),
+  ce qui permet d'utiliser plusieurs comptes sur un même navigateur sans jamais
+  ré-importer, ni mélanger les états.
 
-> **Étape suivante** : le frontend ne possède pas encore d'interface de connexion.
-> Le module `guest-history.js` est prêt ; il restera à :
->  - créer l'interface de connexion/inscription (login) ;
->  - appeler `GuestHistoryV12.setSession(...)` après connexion/déconnexion ;
->  - ajouter le bouton « Importer mon historique invité » (avec confirmation) branché
->    sur `GuestHistoryV12.importToAccount(...)`.
+### Interface de comptes (étape 4)
+
+`public/account.js` (chargé après `guest-history.js` et `app.js`) expose
+`window.AccountUI` :
+
+- **Session côté serveur** : aucune logique d'authentification parallèle ; on
+  réutilise les routes PHP existantes (`auth/csrf`, `auth/login`, `auth/register`,
+  `auth/logout`, `profile`, `profile/update`, `profile/password`, `result/import`).
+- **Cookies sécurisés** gérés par PHP (`SameSite=Lax` + `HttpOnly`). Aucun mot de
+  passe ni cookie de session n'est stocké dans `localStorage` ; seul l'utilisateur
+  public et le jeton CSRF sont gardés **en mémoire** (jamais réhydratés au rechargement).
+- Au chargement / à l'actualisation, on récupère le jeton CSRF puis le profil, et on
+  branche `GuestHistoryV12.setSession({ token, user })` (ou `null`) selon l'état.
+- Connexion, inscription, profil (e-mail, mot de passe) avec messages d'erreur
+  explicites (contraintes : identifiant 3-40 alphanumériques/`_`, mot de passe ≥ 10).
+- **Import volontaire** des parties invitées depuis « Mon compte », avec
+  **confirmation explicite** (`confirm()`), affichage du nombre importé / déjà
+  présent (`doublon`), et conservation des données locales en cas d'échec.
+- L'accès au compte est **désactivé pendant une partie en cours** (un message
+  l'indique) et la session expirée est détectée proprement (401 → retour à la
+  connexion sans perte de données).
 
 ---
 

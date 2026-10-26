@@ -10,6 +10,11 @@
 <body>
   <main class="app-shell">
     <section id="homeScreen" class="screen active home-screen" aria-labelledby="homeTitle">
+      <header class="home-header-wrapper">
+        <div class="home-header">
+          <div id="accountBar" class="account-bar" aria-live="polite"></div>
+        </div>
+      </header>
       <div class="home-card">
         <div class="mission-mark" aria-hidden="true">
           <svg viewBox="0 0 90 90" role="img">
@@ -44,7 +49,7 @@
           </div>
         </div>
       </div>
-      <footer>© Didier SEBASTIEN — 2026 · v11</footer>
+      <footer>© Didier SEBASTIEN — 2026 · v12</footer>
     </section>
 
     <section id="configScreen" class="screen" aria-labelledby="configTitle">
@@ -319,9 +324,139 @@
         </div>
       </div>
     </section>
+
+    <section id="loginScreen" class="screen" aria-labelledby="loginTitle">
+      <div class="panel narrow-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Espace personnel</span>
+          <h2 id="loginTitle">Connexion</h2>
+        </div>
+        <p class="muted">Accédez à votre historique et à vos statistiques.</p>
+
+        <form id="loginForm" novalidate>
+          <div class="form-field">
+            <label for="loginIdentifier">Nom d’utilisateur</label>
+            <input type="text" id="loginIdentifier" name="login" autocomplete="username"
+                   maxlength="40" required placeholder="Votre identifiant">
+          </div>
+          <div class="form-field">
+            <label for="loginPassword">Mot de passe</label>
+            <input type="password" id="loginPassword" name="password" autocomplete="current-password"
+                   required placeholder="Votre mot de passe">
+          </div>
+          <p id="loginFeedback" class="form-message" aria-live="polite"></p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="loginSubmit">Se connecter</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="register">Créer un compte</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="registerScreen" class="screen" aria-labelledby="registerTitle">
+      <div class="panel narrow-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Espace personnel</span>
+          <h2 id="registerTitle">Inscription</h2>
+        </div>
+        <p class="muted">Créez un compte pour conserver vos parties et vos statistiques.</p>
+
+        <form id="registerForm" novalidate>
+          <div class="form-field">
+            <label for="registerLogin">Nom d’utilisateur (unique)</label>
+            <input type="text" id="registerLogin" name="login" autocomplete="username"
+                   maxlength="40" required placeholder="3 à 40 caractères (lettres, chiffres, _)">
+          </div>
+          <div class="form-field">
+            <label for="registerEmail">E-mail (facultatif)</label>
+            <input type="email" id="registerEmail" name="email" autocomplete="email"
+                   inputmode="email" placeholder="vous@exemple.fr">
+          </div>
+          <div class="form-field">
+            <label for="registerPassword">Mot de passe</label>
+            <input type="password" id="registerPassword" name="password" autocomplete="new-password"
+                   minlength="10" required placeholder="10 caractères minimum">
+          </div>
+          <div class="form-field">
+            <label for="registerPasswordConfirm">Confirmation du mot de passe</label>
+            <input type="password" id="registerPasswordConfirm" name="password_confirm"
+                   autocomplete="new-password" minlength="10" required placeholder="Répétez le mot de passe">
+          </div>
+          <p id="registerFeedback" class="form-message" aria-live="polite"></p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="registerSubmit">S’inscrire</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="login">Déjà un compte ? Se connecter</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="accountScreen" class="screen" aria-labelledby="accountTitle">
+      <div class="panel wide-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Espace personnel</span>
+          <h2 id="accountTitle">Mon compte</h2>
+        </div>
+        <div id="accountSummary" class="account-summary"></div>
+
+        <div id="guestImportBlock" class="import-block" hidden>
+          <h3>Mes anciennes parties</h3>
+          <p id="guestImportInfo" class="muted"></p>
+          <div id="guestImportActions">
+            <button type="button" class="btn btn-primary" id="importGuestBtn">Importer mes anciennes parties</button>
+          </div>
+          <p id="importFeedback" class="form-message" aria-live="polite"></p>
+        </div>
+
+        <h3>Modifier l’adresse e-mail</h3>
+        <form id="emailForm" class="account-form" novalidate>
+          <div class="form-field">
+            <label for="emailField">Adresse e-mail</label>
+            <input type="email" id="emailField" name="email" autocomplete="email" inputmode="email"
+                   placeholder="vide pour retirer l’e-mail">
+          </div>
+          <p id="emailFeedback" class="form-message" aria-live="polite"></p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="emailSubmit">Enregistrer l’e-mail</button>
+          </div>
+        </form>
+
+        <h3>Changer le mot de passe</h3>
+        <form id="passwordForm" class="account-form" novalidate>
+          <div class="form-field">
+            <label for="oldPassword">Mot de passe actuel</label>
+            <input type="password" id="oldPassword" name="old_password" autocomplete="current-password" required>
+          </div>
+          <div class="form-field">
+            <label for="newPassword">Nouveau mot de passe</label>
+            <input type="password" id="newPassword" name="new_password" autocomplete="new-password"
+                   minlength="10" required placeholder="10 caractères minimum">
+          </div>
+          <div class="form-field">
+            <label for="newPasswordConfirm">Confirmation du nouveau mot de passe</label>
+            <input type="password" id="newPasswordConfirm" name="new_password_confirm"
+                   autocomplete="new-password" minlength="10" required>
+          </div>
+          <p id="passwordFeedback" class="form-message" aria-live="polite"></p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="passwordSubmit">Changer le mot de passe</button>
+          </div>
+        </form>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-danger" data-account-logout>Se déconnecter</button>
+          <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <div id="accountToast" class="account-toast" role="status" aria-live="polite" hidden></div>
 
   <script src="guest-history.js"></script>
   <script src="app.js"></script>
+  <script src="account.js"></script>
 </body>
 </html>
