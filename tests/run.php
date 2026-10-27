@@ -21,6 +21,8 @@ final class TestRunner
     private int $failed = 0;
     private array $failures = [];
     private string $tmpRoot;
+    /** Répertoires SQLite isolés créés par les tests d'administration. */
+    private array $adminDirs = [];
 
     public function __construct()
     {
@@ -68,6 +70,15 @@ final class TestRunner
         $this->testStatsInvalidMode();
         $this->testStatsIncludesImported();
 
+        // Étape 7 : espace d'administration (v12.1).
+        $this->testAdminRepository();
+        $this->testAdminServiceListAndDetail();
+        $this->testAdminServiceRole();
+        $this->testAdminServiceActive();
+        $this->testAdminServicePassword();
+        $this->testAdminServiceStats();
+        $this->testAdminLastAdminGuard();
+
         echo "\n=== Résumé ===\n";
         echo "Tests réussis : {$this->passed}\n";
         echo "Tests échoués : {$this->failed}\n";
@@ -95,6 +106,323 @@ final class TestRunner
     }
 
     // --- Tests : PRAGMA et connexion ---
+
+    // --- Étape 7 : espace d'administration (v12.1) ---
+
+    /**
+     * Fabrique un espace d'administration sur une base SQLite dédiée et vierge.
+     *
+     * Chaque appel crée un sous-répertoire isolé sous $tmpRoot : les comptages
+     * globaux (listUsers, globalStats) comme l'unicité du dernier administrateur
+     * restent déterministes, indépendamment des autres tests qui partagent la
+     * base temporaire commune de la suite.
+     *
+     * @return array{svc:AdminService,repo:UserRepository,pdo:PDO,auth:AuthService}
+     */
+    private function adminHarness(): array
+    {
+        $root = $this->tmpRoot . DIRECTORY_SEPARATOR . 'admin_' . uniqid();
+        $db = new Database($root);
+        $this->adminDirs[] = $root;
+        $pdo = $db->pdo();
+        $users = new UserRepository($pdo);
+        $auth = new AuthService($pdo, $users);
+        $adminRepo = new AdminRepository($pdo);
+        $svc = new AdminService($pdo, $auth, $users, $adminRepo);
+        return ['svc' => $svc, 'repo' => $users, 'pdo' => $pdo, 'auth' => $auth];
+    }
+
+    private function testAdminRepository(): void
+    {
+        echo "[Administration — dépôt AdminRepository]\n";
+        try {
+            $h = $this->adminHarness();
+            $pdo = $h['pdo'];
+            $repo = $h['repo'];
+            $adminRepo = new AdminRepository($pdo);
+
+            $aid = $repo->create(['login' => 'dumbo', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'charlie', 'password' => 'motdepasse456', 'role' => 'user']);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $results->save($uid, 'multiplication', 8);
+            $results->save($uid, 'addition', 6);
+
+            $this->check($adminRepo->playedGamesFor($uid) === 2, 'AdminRepository::playedGamesFor compte 2 parties');
+            $this->check($adminRepo->playedGamesFor($aid) === 0, 'AdminRepository::playedGamesFor = 0 pour admin');
+
+            $hist = $adminRepo->historyFor($uid);
+            $this->check(count($hist) === 2, 'AdminRepository::historyFor renvoie 2 parties');
+            $this->check(!isset($hist[0]['user_id']), 'historyFor ne fuit pas user_id');
+            $this->check(isset($hist[0]['mode'], $hist[0]['score']), 'historyFor expose mode/score publics');
+
+            // Aggrégats globaux : on compare par différence (delta) pour rester
+            // indépendant des autres tests partageant la base temporaire.
+            $beforeUser = $repo->count();
+            $beforeGames = $adminRepo->globalTotals('2000-01-01T00:00:00Z', '2000-01-01T00:00:00Z')['games']['total'];
+            $aid2 = $repo->create(['login' => 'delta_user', 'password' => 'motdepasse789', 'role' => 'user']);
+            $results->save($aid2, 'addition', 5);
+
+            $totals = $adminRepo->globalTotals('2000-01-01T00:00:00Z', '2000-01-01T00:00:00Z');
+            $this->check($totals['users']['total'] === $beforeUser + 1, 'globalTotals users.total suit le delta');
+            $this->check($totals['games']['total'] === $beforeGames + 1, 'globalTotals games.total suit le delta');
+            $this->check($totals['games']['last_30d'] === $beforeGames + 1, 'globalTotals games.last_30d suit le delta');
+
+            $this->check($totals['users']['admins'] >= 1, 'globalTotals users.admins ≥ 1 (au moins les admins créés)');
+            $this->check($totals['games']['multiplication'] >= 1, 'globalTotals games.multiplication ≥ 1');
+            $this->check($totals['games']['addition'] >= 1, 'globalTotals games.addition ≥ 1');
+
+            $daily = $adminRepo->dailyGameCount('2000-01-01T00:00:00Z', 30, 'Indian/Reunion');
+            $this->check(count($daily) === 30, 'dailyGameCount construit 30 jours');
+            $this->check(isset($daily[0]['day'], $daily[0]['games']), 'dailyGameCount expose day/games');
+        } catch (Throwable $e) {
+            $this->check(false, 'AdminRepository : ' . $e->getMessage());
+        }
+    }
+
+    private function testAdminServiceListAndDetail(): void
+    {
+        echo "[Administration — liste et détail]\n";
+        try {
+            $h = $this->adminHarness();
+            $repo = $h['repo'];
+            $svc = $h['svc'];
+
+            // Le total global sert de référence AVANT d'ajouter nos 2 comptes pour
+            // vérifier le delta (indépendant des tests partageant la base temporaire).
+            $beforeTotal = $repo->count();
+
+            $aid = $repo->create(['login' => 'adminv', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'bob', 'password' => 'motdepasse456', 'role' => 'user']);
+            $results = new ResultService($h['pdo'], new ResultRepository($h['pdo']));
+            $results->save($uid, 'multiplication', 8);
+
+            $list = $svc->listUsers();
+            $this->check($list['total'] === $beforeTotal + 2, 'listUsers total suit le delta (+2)');
+            $this->check(count($list['users']) === $beforeTotal + 2, 'listUsers renvoie toutes les fiches');
+            foreach ($list['users'] as $u) {
+                $this->check(!isset($u['password_hash']), 'listUsers ne fuit pas password_hash');
+                $this->check(!array_key_exists('email', $u), 'listUsers ne fuit pas e-mail');
+            }
+
+            $search = $svc->listUsers('bob');
+            $this->check($search['total'] === 1 && $search['users'][0]['login'] === 'bob', 'listUsers recherche par login');
+
+            $detail = $svc->userDetail($uid);
+            $this->check(is_array($detail) && $detail['login'] === 'bob', 'userDetail renvoie le compte');
+            $this->check($detail['played_games'] === 1, 'userDetail played_games = 1');
+            $this->check(count($detail['history']) === 1, 'userDetail history = 1 partie');
+            $this->check(!isset($detail['password_hash']), 'userDetail ne fuit pas password_hash');
+            $this->check(!array_key_exists('email', $detail), 'userDetail ne fuit pas e-mail');
+
+            $this->check($svc->userDetail(999999) === null, 'userDetail inexistant = null');
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm liste/détail : ' . $e->getMessage());
+        }
+    }
+
+
+    private function testAdminServiceRole(): void
+    {
+        echo "[Administration — rôles]\n";
+        try {
+            $h = $this->adminHarness();
+            $svc = $h['svc'];
+            $repo = $h['repo'];
+
+            $aid = $repo->create(['login' => 'rootv', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'carole', 'password' => 'motdepasse456', 'role' => 'user']);
+
+            $fiche = $svc->setRole($uid, true, $aid);
+            $this->check($fiche['role'] === 'admin', 'setRole(true) élève carole au rang admin');
+
+            $fiche2 = $svc->setRole($uid, false, $aid);
+            $this->check($fiche2['role'] === 'user', 'setRole(false) retire le rôle admin');
+
+            try {
+                $svc->setRole(999999, true, $aid);
+                $this->check(false, 'setRole cible inexistante levée');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'setRole cible inexistante levée');
+            }
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm rôles : ' . $e->getMessage());
+        }
+    }
+
+    private function testAdminServiceActive(): void
+    {
+        echo "[Administration — activation / désactivation]\n";
+        try {
+            $h = $this->adminHarness();
+            $svc = $h['svc'];
+            $repo = $h['repo'];
+
+            $aid = $repo->create(['login' => 'active_root', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'dave', 'password' => 'motdepasse456', 'role' => 'user']);
+
+            $fiche = $svc->setActive($uid, false);
+            $this->check($fiche['is_active'] === false, 'setActive(false) désactive dave');
+            $this->check($repo->findById($uid) !== null, 'La ligne dave est conservée (soft delete)');
+
+            $fiche2 = $svc->setActive($uid, true);
+            $this->check($fiche2['is_active'] === true, 'setActive(true) réactive dave');
+
+            try {
+                $svc->setActive(999999, false);
+                $this->check(false, 'setActive cible inexistante levée');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'setActive cible inexistante levée');
+            }
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm activation : ' . $e->getMessage());
+        }
+    }
+
+
+    private function testAdminServicePassword(): void
+    {
+        echo "[Administration — réinitialisation du mot de passe]\n";
+        try {
+            $h = $this->adminHarness();
+            $svc = $h['svc'];
+            $repo = $h['repo'];
+
+            $aid = $repo->create(['login' => 'pwd_root', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'eve', 'password' => 'ancien123456', 'role' => 'user']);
+
+            $reset = $svc->resetPassword($uid);
+            $this->check($reset['login'] === 'eve', 'resetPassword renvoie le login');
+            $this->check(strlen($reset['temporary_password']) >= 10, 'resetPassword génère ≥ 10 caractères');
+            $this->check($repo->verifyPassword($repo->findById($uid), $reset['temporary_password']), 'Mot de passe temporaire authentifie eve');
+
+            try {
+                $svc->resetPassword(999999);
+                $this->check(false, 'resetPassword cible inexistante levée');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'resetPassword cible inexistante levée');
+            }
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm mot de passe : ' . $e->getMessage());
+        }
+    }
+
+    private function testAdminServiceStats(): void
+    {
+        echo "[Administration — statistiques globales]\n";
+        try {
+            $h = $this->adminHarness();
+            $svc = $h['svc'];
+            $repo = $h['repo'];
+            $pdo = $h['pdo'];
+
+            $now = new DateTimeImmutable('2026-10-27T12:00:00Z');
+            $base = $svc->globalStats($now);
+
+            $repo->create(['login' => 'stats_root2', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'franck2', 'password' => 'motdepasse456', 'role' => 'user']);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $results->save($uid, 'multiplication', 8);
+            $results->save($uid, 'addition', 6);
+
+            $g = $svc->globalStats($now);
+
+            $this->check($g['users']['total'] === $base['users']['total'] + 2, 'globalStats users.total suit le delta (+2)');
+            $this->check($g['users']['admins'] === $base['users']['admins'] + 1, 'globalStats users.admins +1');
+            $this->check($g['users']['admins_active'] === $base['users']['admins_active'] + 1, 'globalStats users.admins_active +1 (admin actif créé)');
+            $this->check($g['games']['total'] === $base['games']['total'] + 2, 'globalStats games.total suit le delta (+2)');
+            $this->check($g['games']['multiplication'] === $base['games']['multiplication'] + 1, 'globalStats games.multiplication +1');
+            $this->check($g['games']['addition'] === $base['games']['addition'] + 1, 'globalStats games.addition +1');
+
+            // Répartition relative d'additions/multiplications : les seuls 2 modes
+            // gérés se partagent 100 %. (Ne pas figer 50/50 : des parties préexistantes
+            // d'autres tests de la base partagée biaiseraient le ratio.)
+            $pctSum = $g['games']['multiplication_pct'] + $g['games']['addition_pct'];
+            $this->check(abs($pctSum - 100.0) < 0.05, 'globalStats multiplication_pct + addition_pct = 100 %');
+            $this->check($g['games']['multiplication_pct'] >= 0 && $g['games']['multiplication_pct'] <= 100, 'globalStats multiplication_pct dans [0;100]');
+            $this->check(is_array($g['activity']) && count($g['activity']) === 30, 'globalStats activity = série de 30 jours');
+            $this->check($g['generated_at_utc'] === '2026-10-27T12:00:00Z', 'globalStats generated_at_utc format strict UTC');
+
+            $this->check(!isset($g['password_hash']) && !array_key_exists('email', $g), 'globalStats sans données sensibles');
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm stats globales : ' . $e->getMessage());
+        }
+    }
+
+    private function testAdminLastAdminGuard(): void
+    {
+        echo "[Administration — protection du dernier administrateur]\n";
+        try {
+            $h = $this->adminHarness();
+            $svc = $h['svc'];
+            $repo = $h['repo'];
+
+            $aid = $repo->create(['login' => 'unique_root', 'password' => 'motdepasse123', 'role' => 'admin']);
+            $uid = $repo->create(['login' => 'greg', 'password' => 'motdepasse456', 'role' => 'user']);
+
+            // 0. Dénombrement : un seul administrateur actif au départ.
+            $stats0 = $svc->globalStats();
+            $this->check($stats0['users']['admins_active'] === 1, 'admins_active = 1 pour un seul admin actif');
+
+            // 1. Retrait du rôle au dernier admin actif => 403.
+            $blocked = false;
+            try {
+                $svc->setRole($aid, false, $uid);
+            } catch (RuntimeException $e) {
+                $blocked = ($e->getCode() === 403);
+            }
+            $this->check($blocked, 'setRole : impossible de retirer le rôle au dernier admin actif');
+
+            // 2. Désactivation du dernier admin actif => 403.
+            $blocked = false;
+            try {
+                $svc->setActive($aid, false);
+            } catch (RuntimeException $e) {
+                $blocked = ($e->getCode() === 403);
+            }
+            $this->check($blocked, 'setActive : impossible de désactiver le dernier admin actif');
+
+            // 3. Dès qu'un autre admin actif existe, le retrait/désactivation est permis.
+            $svc->setRole($uid, true, $aid);
+            $this->check($svc->globalStats()['users']['admins_active'] === 2, 'admins_active = 2 pour deux admins actifs');
+            $fiche = $svc->setRole($aid, false, $uid);
+            $this->check($fiche['role'] === 'user', "setRole : retrait permis dès qu'un 2e admin actif existe");
+
+            // 4. Et la désactivation de l'ancien dernier admin est alors possible.
+            $svc->setRole($aid, true, $uid);
+            $fiche2 = $svc->setActive($aid, false);
+            $this->check($fiche2['is_active'] === false, 'setActive : désactivation permise avec un 2e admin actif');
+
+            // 4bis. Deux comptes avec rôle admin, mais un seul actif : protection maintenue.
+            $stats2 = $svc->globalStats();
+            $this->check(
+                $stats2['users']['admins'] === 2 && $stats2['users']['admins_active'] === 1,
+                'deux comptes admin mais un seul actif => admins_active = 1'
+            );
+            $blocked = false;
+            try {
+                $svc->setRole($uid, false, $aid); // greg est le seul admin ACTIF restant
+            } catch (RuntimeException $e) {
+                $blocked = ($e->getCode() === 403);
+            }
+            $this->check($blocked, 'setRole bloqué quand l’autre admin est inactif (dernier admin actif)');
+            $blocked = false;
+            try {
+                $svc->setActive($uid, false); // greg est le seul admin ACTIF restant
+            } catch (RuntimeException $e) {
+                $blocked = ($e->getCode() === 403);
+            }
+            $this->check($blocked, 'setActive bloqué quand l’autre admin est inactif (dernier admin actif)');
+
+            // 5. Réactivation de l'ancien admin => 2 admins actifs, actions à nouveau permises.
+            $svc->setActive($aid, true);
+            $this->check($svc->globalStats()['users']['admins_active'] === 2, 'admins_active = 2 après réactivation');
+            $fiche3 = $svc->setRole($uid, false, $aid);
+            $this->check($fiche3['role'] === 'user', 'retrait permis dès 2 admins actifs (après réactivation)');
+        } catch (Throwable $e) {
+            $this->check(false, 'Adm protection dernier admin : ' . $e->getMessage());
+        }
+    }
+
 
     private function testDatabasePragmas(): void
     {
@@ -340,6 +668,16 @@ final class TestRunner
             $this->check(($connected['login'] ?? '') === 'dave', 'Connexion avec mot de passe correct');
             $this->check((int)($_SESSION['user_id'] ?? 0) > 0, 'Session créée après connexion');
             $this->check($auth->currentUser() !== null, 'Utilisateur courant accessible après connexion');
+
+            // Désactivation du compte alors qu'une session est ouverte : la
+            // session existante devient immédiatement inutilisable (currentUser()=null),
+            // sans destruction explicite nécessaire, car l'état est rechargé à chaque
+            // requête depuis la base.
+            $daveId = (int)($connected['id'] ?? 0);
+            $repo->setActive($daveId, false);
+            $this->check($auth->currentUser() === null, 'Session d\'un compte désactivé => inutilisable (currentUser null)');
+            $repo->setActive($daveId, true);
+            $this->check($auth->currentUser() !== null, 'Réactivation => session de nouveau utilisable');
 
             // Déconnexion.
             $auth->logout();
@@ -742,6 +1080,18 @@ final class TestRunner
 
     private function cleanup(): void
     {
+        // Supprime récursivement les bases SQLite isolées des tests d'administration.
+        foreach ($this->adminDirs as $dir) {
+            if (!is_dir($dir)) {
+                continue;
+            }
+            foreach (glob($dir . '/*') ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($dir);
+        }
+        $this->adminDirs = [];
+
         $files = glob($this->tmpRoot . '/*');
         if (is_array($files)) {
             foreach ($files as $f) {

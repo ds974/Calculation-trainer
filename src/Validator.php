@@ -69,6 +69,32 @@ final class Validator
     }
 
     /**
+     * Normalise une valeur d'activation de compte en booléen strict.
+     * Accepte true/false (bool), 1/0 (int) et leurs formes numériques en chaîne.
+     *
+     * @return bool|null true/false si valide, null sinon.
+     */
+    public static function active(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value === 1 ? true : ($value === 0 ? false : null);
+        }
+        if (is_string($value)) {
+            $v = strtolower(trim($value));
+            if (in_array($v, ['1', 'true', 'on', 'yes'], true)) {
+                return true;
+            }
+            if (in_array($v, ['0', 'false', 'off', 'no'], true)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Valide un score (entier entre 0 et 10).
      */
     public static function score(mixed $score): bool

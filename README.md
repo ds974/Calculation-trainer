@@ -288,3 +288,42 @@ la session).
 - Contrôle des autorisations **côté serveur** (rôle `admin`) pour toute opération
   d'administration.
 - Secrets jamais inclus dans le code source ni dans les réponses JSON.
+
+---
+
+## Vérification manuelle de l’interface d’administration (frontend)
+
+L’interface d’administration (`public/admin.js`, section `#adminScreen`) n’est qu’une
+commodité : **toute la sécurité reste côté serveur** (rôle `admin`, jeton CSRF sur les POST,
+règle du « dernier administrateur actif », invalidation des sessions des comptes désactivés).
+
+### Prérequis
+
+- Le premier compte administrateur a été créé (`php scripts/initialize.php`, login `admin`).
+- Le serveur est lancé : `php -S localhost:8000 -t public`, puis ouvrir `http://localhost:8000/`.
+
+### Parcours recommandé (Firefox)
+
+1. **Connexion admin** : depuis l’accueil, « Se connecter / S’inscrire », puis identifiants admin.
+   Le bouton **« Administration »** doit apparaître dans la barre de compte (uniquement pour le rôle
+   `admin`), à côté de « Mon compte ».
+2. **Tableau de bord** : cliquer « Administration ». Vérifier les 8 cartes statistiques (comptes,
+   admins, actifs, parties totales, 7 j, 30 j, répartition mult/add) et la note de période.
+3. **Liste des comptes** : tableau avec rôle/statut/date ; tester la recherche par identifiant
+   (saisie avec debounce ~350 ms et bouton « Rechercher »).
+4. **Détail d’un compte** : « Consulter » → panneau avec fiche (rôle, statut, création, dernier
+   accès, parties jouées) et historique récent ; « Fermer » le referme.
+5. **Actions sensibles** (chacune est précédée d’un `window.confirm`) :
+   - *Promouvoir / rétrograder* un compte (admin/role) — la rétrogradation du **dernier admin actif**
+     doit être refusée par le serveur avec un message clair.
+   - *Désactiver / réactiver* un compte (admin/active). Une fois désactivé, tenter de se connecter
+     avec ce compte doit échouer (403), et une session déjà ouverte de ce compte doit être
+     immédiatement inutilisable (401 → retour à la connexion).
+   - *Reset mot de passe* (admin/password) : une boîte affiche **une seule fois** le mot de passe
+     temporaire, avec bouton « Copier » puis fermeture.
+6. **Responsive** : réduire la fenêtre (< 650 px) — tableau défilable, cartes sur 2 puis 1 colonne,
+   recherche et panneau de détail empilés.
+7. **Rôles** : se connecter en compte non-admin → le bouton « Administration » est masqué et,
+   si l’écran était ouvert, l’utilisateur est ramené à l’accueil (protection visuelle ; la
+   protection réelle reste le 403 côté serveur).
+

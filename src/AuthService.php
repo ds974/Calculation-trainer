@@ -96,8 +96,20 @@ final class AuthService
             throw new RuntimeException('Identifiants invalides.', 401);
         }
 
+        // Compte désactivé par un administrateur : refus de connexion.
+        // Vérifiée APRÈS vérification du mot de passe, pour ne pas révéler à un
+        // tiers (qui ne connaîtrait pas le mot de passe) l'existence/l'état d'un
+        // compte : seul le détenteur légitime, identifié par son mot de passe,
+        // peut voir ce message. L'historique du compte est conservé tel quel.
+        if (isset($user['is_active']) && (int)$user['is_active'] !== 1) {
+            $this->recordFailure($login, $ip);
+            throw new RuntimeException('Ce compte est désactivé. Contactez un administrateur.', 403);
+        }
+
         // Succès : on réinitialise le compteur et on régénère la session.
         $this->clearFailures($login, $ip);
+        // Enregistre l'horodatage UTC du dernier accès (informations administratives).
+        $this->users->recordLogin((int)$user['id']);
 
         Security::regenerateSession();
         $_SESSION['user_id'] = (int)$user['id'];
@@ -126,7 +138,18 @@ final class AuthService
             return null;
         }
         $user = $this->users->findById($userId);
-        return $user === null ? null : $this->publicUser($user);
+        if ($user === null) {
+            // Compte absent de la base : aucune session ne doit rester valable.
+            return null;
+        }
+        // Un compte désactivé voit sa session IMMÉDIATEMENT rendue inutilisable :
+        // on recharge l'état depuis la base à chaque requête, donc dès qu'un
+        // administrateur désactive le compte, toute session déjà ouverte cesse
+        // de fonctionner (cette requête comme les suivantes renvoient 401).
+        if (isset($user['is_active']) && (int)$user['is_active'] !== 1) {
+            return null;
+        }
+        return $this->publicUser($user);
     }
 
     /**
@@ -175,10 +198,12 @@ final class AuthService
     public function publicUser(array $row): array
     {
         return [
-            'id'         => (int)$row['id'],
-            'login'      => (string)$row['login'],
-            'role'       => (string)$row['role'],
-            'created_at' => (string)$row['created_at'],
+            'id'            => (int)$row['id'],
+            'login'         => (string)$row['login'],
+            'role'          => (string)$row['role'],
+            'created_at'    => (string)$row['created_at'],
+            'is_active'     => isset($row['is_active']) ? (int)$row['is_active'] === 1 : true,
+            'last_login_at' => isset($row['last_login_at']) ? (string)$row['last_login_at'] : null,
         ];
     }
 

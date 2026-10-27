@@ -138,6 +138,13 @@ const AccountUI = (() => {
       StatsUI.hide();
     }
 
+    // Espace d'administration (v12.1) — module dédié (admin.js).
+    if (screenId === "adminScreen") {
+      if (typeof AdminUI !== "undefined" && AdminUI.show) AdminUI.show();
+    } else if (typeof AdminUI !== "undefined" && AdminUI.hide) {
+      AdminUI.hide();
+    }
+
     showScreen(screenId);
   }
 
@@ -164,12 +171,18 @@ const AccountUI = (() => {
       btnAccount.className = "btn btn-secondary btn-small";
       btnAccount.textContent = "Mon compte";
       btnAccount.dataset.accountNav = "account";
+      const btnAdmin = document.createElement("button");
+      btnAdmin.type = "button";
+      btnAdmin.className = "btn btn-secondary btn-small";
+      btnAdmin.textContent = "Administration";
+      btnAdmin.dataset.accountNav = "admin";
+      btnAdmin.hidden = !(user.role === "admin");
       const btnLogout = document.createElement("button");
       btnLogout.type = "button";
       btnLogout.className = "btn btn-secondary btn-small";
       btnLogout.textContent = "Se déconnecter";
       btnLogout.dataset.accountLogout = "";
-      chip.append(label, btnAccount, btnLogout);
+      chip.append(label, btnAccount, btnAdmin, btnLogout);
       bar.appendChild(chip);
     } else {
       const chip = document.createElement("div");
@@ -184,6 +197,29 @@ const AccountUI = (() => {
       btnLogin.dataset.accountNav = "login";
       chip.append(hint, btnLogin);
       bar.appendChild(chip);
+    }
+    syncAdminAccess();
+  }
+
+  /**
+   * Garde l'interface d'administration cohérente avec le rôle actuel :
+   * - masque le bouton « Administration » pour les non-admin ;
+   * - si l'utilisateur perd le rôle admin (ou se déconnecte) alors qu'il est
+   *   sur l'écran admin, on le ramène à l'accueil pour ne pas laisser une
+   *   interface vide (la protection, elle, reste 100 % côté serveur).
+   */
+  function syncAdminAccess() {
+    if (typeof window.AdminUI === "undefined") return;
+    const isAdmin = !!user && user.role === "admin";
+    // Masquer le bouton du menu (géré par renderAccountBar via hidden).
+    if (isAdmin) {
+      window.AdminUI.updateAccess(true);
+    } else {
+      window.AdminUI.updateAccess(false);
+      const adminScreen = document.getElementById("adminScreen");
+      if (adminScreen && adminScreen.classList.contains("active")) {
+        goHome();
+      }
     }
   }
 
@@ -540,6 +576,12 @@ const AccountUI = (() => {
   return {
     init,
     refreshProfile,
+    api,
+    showToast,
+    handleSessionExpired,
+    // Accès à l'état utilisateur courant (utilisé par l'interface admin).
+    getUser: () => user,
+    isAdmin: () => !!user && user.role === "admin",
   };
 })();
 

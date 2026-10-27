@@ -117,4 +117,66 @@ final class UserRepository
         $stmt->execute(['role' => 'admin']);
         return (int)$stmt->fetch()['c'];
     }
+
+    /**
+     * Compte les administrateurs ACTIFS (is_active = 1), éventuellement en excluant un
+     * utilisateur donné. Sert à la protection du « dernier administrateur actif ».
+     */
+    public function countActiveAdminsExcept(int $excludedUserId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) AS c FROM users WHERE role = :role AND is_active = 1 AND id <> :id'
+        );
+        $stmt->execute(['role' => 'admin', 'id' => $excludedUserId]);
+        return (int)$stmt->fetch()['c'];
+    }
+
+    /**
+     * Liste les utilisateurs (fiches publiques sans empreinte), triés par création
+     * décroissante, avec recherche optionnelle sur le login (insensible à la casse).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function findAll(string $search = '', int $limit = 100, int $offset = 0): array
+    {
+        $sql = 'SELECT id, login, role, is_active, created_at, last_login_at
+                FROM users';
+        $params = [];
+        if ($search !== '') {
+            $sql .= ' WHERE login LIKE :search';
+            $params['search'] = '%' . $search . '%';
+        }
+        $sql .= ' ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset';
+
+        $stmt = $this->pdo->prepare($sql);
+        // Les LIKE sont des paramètres string normaux.
+        if ($search !== '') {
+            $stmt->bindValue('search', $params['search'], PDO::PARAM_STR);
+        }
+        $stmt->bindValue('limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue('offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Active (true) ou désactive (false) un compte. Ne supprime jamais la ligne ni
+     * son historique : seule une colonne booléenne est mise à jour.
+     */
+    public function setActive(int $userId, bool $active): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE users SET is_active = :active WHERE id = :id');
+        $stmt->execute(['active' => $active ? 1 : 0, 'id' => $userId]);
+    }
+
+    /**
+     * Enregistre la date/heure UTC du dernier accès réussi d'un utilisateur.
+     */
+    public function recordLogin(int $userId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE users SET last_login_at = strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\') WHERE id = :id'
+        );
+        $stmt->execute(['id' => $userId]);
+    }
 }

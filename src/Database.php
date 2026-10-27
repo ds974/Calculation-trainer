@@ -155,6 +155,18 @@ final class Database
              ON results(user_id, guest_id) WHERE guest_id IS NOT NULL'
         );
 
+        // --- Migration v12.1 (non destructive) : activation des comptes + dernier accès.
+        // Ajoute la colonne is_active (1 = actif, 0 = désactivé) aux bases créées avant
+        // v12.1. Une désactivation préserve intégralement l'utilisateur et son
+        // historique : on ne supprime JAMAIS de ligne de `users` ni de `results`.
+        $usersCols = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (is_array($usersCols) && !in_array('is_active', $usersCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+        }
+        if (is_array($usersCols) && !in_array('last_login_at', $usersCols, true)) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN last_login_at TEXT');
+        }
+
         // Table de limitation des tentatives de connexion (anti brute-force).
         $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,

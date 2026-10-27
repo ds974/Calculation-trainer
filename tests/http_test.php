@@ -441,6 +441,108 @@ $histTs2J = json_decode($histTs2, true);
 $histTs2Count = is_array($histTs2J) && is_array($histTs2J['data']['history'] ?? null) ? count($histTs2J['data']['history']) : -1;
 expect('réimport => 0 importée (idempotent) et historique inchangé (2)', $code === 200 && ($impDupTsJ['data']['imported'] ?? -1) === 0 && $histTs2Count === 2, "HTTP {$code}");
 
+echo "\n=== Test HTTP — administration (v12.1) ===\n";
+
+// 1. Amorçage direct d'un administrateur dans la base jetable. register crée
+//    toujours role=user ; on insère donc un compte admin via PDO sur le même
+//    fichier SQLite isolé (aucun impact sur la base de production).
+$adminPdo = new PDO('sqlite:' . $storageOverride . '/calculation-trainer.sqlite', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+]);
+$adminPdo->prepare("INSERT INTO users (login, email, password_hash, role) VALUES ('admin', NULL, :h, 'admin')")
+    ->execute(['h' => password_hash('adminpass123', PASSWORD_ARGON2ID)]);
+$adminPdo = null; // Ferme la connexion avant la suite.
+
+// Jeton CSRF de la session courante (variable $tok mise à jour par $fetchToken).
+$tok = '';
+$fetchToken = static function () use ($base, $jar, &$tok) {
+    [$c, $b] = get_call("{$base}?action=auth/csrf", $jar);
+    $j = json_decode($b, true);
+    $tok = is_array($j) ? (string)($j['data']['token'] ?? '') : '';
+};
+
+// Inscription d'un compte utilisateur ordinaire (operator85) : renvoie son id.
+$fetchToken();
+[$code, $regB] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'operator85', 'password' => 'op85pass123', 'csrf_token' => $tok], $jar);
+$regBJ = json_decode($regB, true);
+$bobId = is_array($regBJ) ? (int)($regBJ['data']['user']['id'] ?? 0) : 0;
+expect('register operator85 (utilisateur) => 201 avec id', $code === 201 && $bobId > 0, "HTTP {$code} id={$bobId}");
+
+// 2. Un simple utilisateur ne peut pas accéder aux routes admin (403, rôle serveur).
+$fetchToken();
+[$code] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'operator85', 'password' => 'op85pass123', 'csrf_token' => $tok], $jar);
+expect('login operator85 => 200', $code === 200, "HTTP {$code}");
+[$code] = get_call("{$base}?action=admin/users", $jar);
+expect('admin/users pour un simple utilisateur => 403', $code === 403, "HTTP {$code}");
+[$code] = get_call("{$base}?action=admin/stats", $jar);
+expect('admin/stats pour un simple utilisateur => 403', $code === 403, "HTTP {$code}");
+
+// 3. Connexion de l'administrateur -> accès aux routes admin.
+$fetchToken();
+[$code] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'admin', 'password' => 'adminpass123', 'csrf_token' => $tok], $jar);
+expect('login admin (compte administrateur) => 200', $code === 200, "HTTP {$code}");
+
+[$code, $usersB] = get_call("{$base}?action=admin/users", $jar);
+$usersJ = json_decode($usersB, true);
+expect('admin/users (admin) => 200 avec total', $code === 200 && ($usersJ['data']['total'] ?? null) !== null, "HTTP {$code}");
+
+[$code, $statsB] = get_call("{$base}?action=admin/stats", $jar);
+$statsJ = json_decode($statsB, true);
+expect('admin/stats (admin) => 200 avec users.total', $code === 200 && ($statsJ['data']['users']['total'] ?? null) !== null, "HTTP {$code}");
+expect('admin/stats : un seul admin actif au départ => admins_active=1', ($statsJ['data']['users']['admins_active'] ?? null) === 1, 'HTTP ' . $code);
+
+
+[$code, $uB] = get_call("{$base}?action=admin/user&id={$bobId}", $jar);
+$uJ = json_decode($uB, true);
+expect('admin/user (admin) => détail du compte', $code === 200 && ($uJ['data']['user']['login'] ?? '') === 'operator85', "HTTP {$code}");
+expect('admin/user sans fuite de password_hash', !isset($uJ['data']['user']['password_hash']));
+
+// 4. Élévation du rôle de operator85 au rang administrateur.
+$fetchToken();
+[$code, $roleB] = http_call('POST', $base, ['action' => 'admin/role', 'user_id' => $bobId, 'make_admin' => true, 'csrf_token' => $tok], $jar);
+$roleJ = json_decode($roleB, true);
+[$code, $statsAfter] = get_call("{$base}?action=admin/stats", $jar);
+$statsAfterJ = json_decode($statsAfter, true);
+expect('admin/stats : deux admins actifs après élévation => admins_active=2', ($statsAfterJ['data']['users']['admins_active'] ?? null) === 2, 'HTTP ' . $code);
+
+expect('admin/role (make_admin=true) => operator85 devient admin', $code === 200 && ($roleJ['data']['user']['role'] ?? '') === 'admin', "HTTP {$code}");
+
+// 5. Réinitialisation sécurisée du mot de passe, puis connexion de operator85 avec
+//    le mot de passe temporaire reçu.
+$fetchToken();
+[$code, $pwdB] = http_call('POST', $base, ['action' => 'admin/password', 'user_id' => $bobId, 'csrf_token' => $tok], $jar);
+$pwdJ = json_decode($pwdB, true);
+$tempPwd = is_array($pwdJ) ? (string)($pwdJ['data']['reset']['temporary_password'] ?? '') : '';
+expect('admin/password => renvoie un mot de passe temporaire', $code === 200 && strlen($tempPwd) >= 10, "HTTP {$code}");
+
+$fetchToken();
+[$code] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'operator85', 'password' => $tempPwd, 'csrf_token' => $tok], $jar);
+expect('login operator85 avec le mot de passe temporaire => 200', $code === 200, "HTTP {$code}");
+
+// 6. Désactivation du compte de operator85 (soft delete) : connexion ensuite refusée.
+$fetchToken();
+[$code, $actB] = http_call('POST', $base, ['action' => 'admin/active', 'user_id' => $bobId, 'is_active' => false, 'csrf_token' => $tok], $jar);
+$actJ = json_decode($actB, true);
+$actInactive = is_array($actJ) ? ($actJ['data']['user']['is_active'] ?? null) : null;
+expect('admin/active (is_active=false) => compte désactivé', $code === 200 && ($actInactive === false || $actInactive === 0), "HTTP {$code}");
+
+$fetchToken();
+[$code] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'operator85', 'password' => $tempPwd, 'csrf_token' => $tok], $jar);
+expect('login operator85 après désactivation => refusé (403)', $code === 403, "HTTP {$code}");
+
+// 7. Sécurité : une session DEJA ouverte d'un compte désactivé est rendue
+//    immédiatement inutilisable. Le jar contient encore la session que
+//    operator85 avait ouverte avant sa désactivation : tout accès (même au
+//    simple profil, même aux routes admin) doit désormais être refusé (401),
+//    sans nouvelle connexion.
+[$code] = get_call("{$base}?action=profile", $jar);
+expect('session déjà ouverte d\'un compte désactivé => profil refusé (401)', $code === 401, "HTTP {$code}");
+[$code] = get_call("{$base}?action=admin/users", $jar);
+expect('session déjà ouverte (désactivé) => admin/users refusé (401)', $code === 401, "HTTP {$code}");
+[$code] = get_call("{$base}?action=stats&mode=multiplication", $jar);
+expect('session déjà ouverte (désactivé) => stats refusé (401)', $code === 401, "HTTP {$code}");
+
+
 echo "\n=== Résumé HTTP ===\n";
 echo "Tests réussis : {$passed}\n";
 echo "Tests échoués : {$failed}\n";

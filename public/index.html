@@ -460,6 +460,38 @@
         </div>
       </div>
     </section>
+
+    <section id="adminScreen" class="screen admin-screen" aria-labelledby="adminTitle">
+      <div class="panel wide-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Espace réservé aux administrateurs</span>
+          <h2 id="adminTitle">Administration</h2>
+        </div>
+        <p class="muted">Vue d’ensemble de la plateforme et gestion des comptes utilisateurs.</p>
+
+        <!-- Tableau de bord : statistiques globales -->
+        <div id="adminStats" class="admin-block" aria-live="polite"></div>
+
+        <!-- Gestion des comptes -->
+        <div class="admin-block">
+          <div class="admin-section-head">
+            <h3>Comptes</h3>
+            <div class="admin-search">
+              <label class="sr-only" for="adminSearchInput">Rechercher un compte</label>
+              <input type="search" id="adminSearchInput" placeholder="Rechercher par identifiant…"
+                     autocomplete="off" maxlength="40">
+              <button type="button" class="btn btn-secondary btn-small" id="adminSearchBtn">Rechercher</button>
+            </div>
+          </div>
+          <div id="adminUserList" class="admin-userlist" aria-live="polite"></div>
+        </div>
+
+        <!-- Liste des actions sensibles (confirmations) -->
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div id="accountToast" class="account-toast" role="status" aria-live="polite" hidden></div>
@@ -469,5 +501,6 @@
   <script src="vendor/chart.js/chart.umd.min.js"></script>
   <script src="stats.js"></script>
   <script src="account.js"></script>
+  <script src="admin.js"></script>
 </body>
 </html>

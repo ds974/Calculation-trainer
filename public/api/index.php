@@ -21,9 +21,18 @@ declare(strict_types=1);
  *  - result/import         (POST) : import des anciennes parties invitées (connecté).
  *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
  *
+ *  Routes d'administration (réservées au rôle `admin`, vérifié côté serveur) :
+ *  - admin/users           (GET)  : liste des comptes + recherche (option q).
+ *  - admin/user            (GET)  : infos administratives d'un compte (id).
+ *  - admin/stats           (GET)  : statistiques globales.
+ *  - admin/role            (POST) : attribution/retrait du rôle administrateur.
+ *  - admin/active          (POST) : activation/désactivation d'un compte.
+ *  - admin/password        (POST) : réinitialisation sécurisée du mot de passe.
+ *
  * Sécurité : session HttpOnly/SameSite=Lax/Secure (si HTTPS), jeton CSRF
  * obligatoire pour toute opération POST, requêtes préparées, Argon2id,
- * messages génériques ne révélant pas l'existence d'un compte.
+ * messages génériques ne révélant pas l'existence d'un compte. Les routes
+ * admin/* exigent en outre le rôle `admin` SERVEUR (jamais un rôle client).
  *
  * Gestion des e-mails : entièrement supprimée. La colonne `email` de la table
  * `users` est conservée (nullable) pour éviter une restructuration, mais :
@@ -58,6 +67,8 @@ try {
     $resultRepository = new ResultRepository($db->pdo());
     $results = new ResultService($db->pdo(), $resultRepository);
     $stats = new StatsService($resultRepository);
+    $adminRepository = new AdminRepository($db->pdo());
+    $admin = new AdminService($db->pdo(), $auth, $users, $adminRepository);
 
     // Migration idempotente (non destructive) : efface toute valeur d'e-mail
     // résiduelle en base. Conserve les identifiants, mots de passe hachés,
@@ -179,6 +190,85 @@ try {
                 : [];
             $outcome = $results->importGuest((int)$user['id'], $items);
             Response::success($outcome, 201);
+            break;
+
+        // ---------------------------------------------------------------------
+        // Routes d'administration (v12.1) : TOUTES vérifient le rôle côté serveur
+        // via AdminService::requireAdmin($user). Aucune donnée sensible n'est
+        // renvoyée (jamais password_hash ni e-mail).
+        // ---------------------------------------------------------------------
+
+        case 'admin/users':
+            // Liste des comptes, avec recherche optionnelle (réservé admin).
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
+            $limit = max(1, min(200, (int)($_GET['limit'] ?? 100)));
+            $offset = max(0, (int)($_GET['offset'] ?? 0));
+            Response::success($admin->listUsers($search, $limit, $offset));
+            break;
+
+        case 'admin/user':
+            // Consultation des informations administratives d'un compte (réservé admin).
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            $targetId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+            $detail = $targetId > 0 ? $admin->userDetail($targetId) : null;
+            if ($detail === null) {
+                Response::error('Compte introuvable.', 404);
+            }
+            Response::success(['user' => $detail]);
+            break;
+
+        case 'admin/stats':
+            // Statistiques globales (réservé admin).
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            Response::success($admin->globalStats());
+            break;
+
+        case 'admin/role':
+            // Attribution / retrait du rôle administrateur (réservé admin).
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            $targetId = (int)($parsed['user_id'] ?? 0);
+            $makeAdmin = filter_var($parsed['make_admin'] ?? null, FILTER_VALIDATE_BOOLEAN);
+            if ($targetId <= 0) {
+                Response::error('Identifiant de compte invalide.', 400);
+            }
+            $fiche = $admin->setRole($targetId, $makeAdmin, (int)$user['id']);
+            Response::success(['user' => $fiche]);
+            break;
+
+        case 'admin/active':
+            // Activation / désactivation d'un compte (réservé admin, soft delete).
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            $targetId = (int)($parsed['user_id'] ?? 0);
+            $active = Validator::active($parsed['is_active'] ?? null);
+            if ($targetId <= 0) {
+                Response::error('Identifiant de compte invalide.', 400);
+            }
+            if ($active === null) {
+                Response::error("Valeur d'activation invalide.", 400);
+            }
+            $fiche = $admin->setActive($targetId, $active);
+            Response::success(['user' => $fiche]);
+            break;
+
+        case 'admin/password':
+            // Réinitialisation sécurisée du mot de passe d'un compte (réservé admin).
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            $admin->requireAdmin($user);
+            $targetId = (int)($parsed['user_id'] ?? 0);
+            if ($targetId <= 0) {
+                Response::error('Identifiant de compte invalide.', 400);
+            }
+            $reset = $admin->resetPassword($targetId);
+            Response::success(['reset' => $reset]);
             break;
 
         default:
