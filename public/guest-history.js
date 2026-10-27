@@ -118,6 +118,25 @@ const GuestHistoryV12 = (() => {
     return mode === "add" ? "addition" : "multiplication";
   }
 
+  /**
+   * Normalise une date ISO (produite notamment par new Date().toISOString())
+   * vers le format strict attendu par le backend : YYYY-MM-DDTHH:mm:ssZ, SANS
+   * millisecondes. L'instant est préservé à la précision de la seconde : dans
+   * toISOString(), les fractions sont toujours exactement 3 chiffres (.sssZ),
+   * on se contente donc de retirer ".sss" en fin de chaîne.
+   *
+   * @param {string|Date|number} [value] date brute ; si vide ou invalide,
+   *   on retombe sur l'instant courant (UTC).
+   * @return {string} horodatage UTC au format strict (contrat backend).
+   */
+  function toUtcSecondsIso(value) {
+    const d = value ? new Date(value) : new Date();
+    if (isNaN(d.getTime())) {
+      return toUtcSecondsIso();
+    }
+    return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+
   /** Appel HTTP JSON vers l'API. Renvoie {ok, status, data, error}. */
   async function api(action, payload) {
     try {
@@ -146,7 +165,7 @@ const GuestHistoryV12 = (() => {
    */
   async function record(part) {
     const mode = serverMode(part.mode);
-    const playedAt = part.playedAt || new Date().toISOString();
+    const playedAt = toUtcSecondsIso(part.playedAt);
 
     if (session) {
       const res = await api("result/save", { mode, score: part.score, played_at: playedAt });
@@ -193,7 +212,7 @@ const GuestHistoryV12 = (() => {
         guest_id: e.guest_id,
         mode: serverMode(e.mode),
         score: e.score,
-        played_at: e.played_at,
+        played_at: toUtcSecondsIso(e.played_at),
       })),
     });
 
@@ -214,6 +233,7 @@ const GuestHistoryV12 = (() => {
 
   return {
     setSession,
+    toUtcSecondsIso,
     record,
     importToAccount,
     loadAll,

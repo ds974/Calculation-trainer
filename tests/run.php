@@ -54,11 +54,19 @@ final class TestRunner
         // Étape 3 : enregistrement des résultats, historique et import invité.
         $this->testResultSave();
         $this->testResultValidation();
+        $this->testResultPlayedAtContract();
         $this->testResultAuth();
         $this->testResultHistoryIsolation();
         $this->testGuestImport();
         $this->testGuestImportDuplicate();
         $this->testGuestImportMalformed();
+
+        // Étape 6 : statistiques personnelles (backend).
+        $this->testStatsAggregation();
+        $this->testStatsIsolation();
+        $this->testStatsReunionTimezone();
+        $this->testStatsInvalidMode();
+        $this->testStatsIncludesImported();
 
         echo "\n=== Résumé ===\n";
         echo "Tests réussis : {$this->passed}\n";
@@ -634,6 +642,80 @@ final class TestRunner
         }
     }
 
+    // --- Étape 3 : contrat d'horodatage UTC (played_at) — moteur du correctif
+    // frontend. Le backend reste STRICT (YYYY-MM-DDTHH:mm:ssZ, sans
+    // millisecondes) : un client qui enverrait new Date().toISOString() brut
+    // (avec .sssZ) est refusé, ce qui rend la normalisation côté client
+    // INDISPENSABLE. Ces tests verrouillent ce contrat pour éviter la perte
+    // silencieuse de résultats.
+
+    private function testResultPlayedAtContract(): void
+    {
+        echo "[Contrat d'horodatage played_at (normalisation frontend)]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $stats = new StatsService(new ResultRepository($pdo));
+            $id = $repo->create(['login' => 'ts_contract', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // 1. Format strict (ce que la normalisation frontend produit) : accepté.
+            $rid = $results->save($id, 'multiplication', 9, '2026-10-27T10:00:00Z');
+            $this->check($rid > 0, 'save avec format strict ...Z accepté');
+
+            // 2. new Date().toISOString() brut (avec millisecondes) : REFUSÉ.
+            $msRejected = false;
+            try {
+                $results->save($id, 'multiplication', 4, '2026-10-27T10:00:00.123Z');
+            } catch (InvalidArgumentException) {
+                $msRejected = true;
+            }
+            $this->check($msRejected, 'save avec millisecondes (.123Z) refusé => la normalisation client est requise');
+
+            // 3. Import invité : une entrée avec millisecondes est sautée (rejetée)…
+            $msImport = $results->importGuest($id, [
+                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00.456Z'],
+            ]);
+            $this->check(
+                $msImport['imported'] === 0 && $msImport['skipped'] === 1,
+                'import avec played_at à millisecondes : 0 importée, 1 sautée'
+            );
+
+            // 4. …et la version normalisée (strict) est bien importée puis visible.
+            $normImport = $results->importGuest($id, [
+                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
+            ]);
+            $this->check(
+                $normImport['imported'] === 1,
+                'import de la version normalisée (strict) : 1 importée'
+            );
+            $history = $results->history($id);
+            $this->check(
+                count($history) === 2,
+                'les 2 parties (1 save strict + 1 import strict) sont visibles dans l\'historique'
+            );
+
+            // 5. Les statistiques reflètent bien ces parties.
+            $s = $stats->stats($id, 'multiplication');
+            $this->check(
+                ($s['totals']['games'] ?? -1) === 2,
+                'les statistiques intègrent les 2 parties (total = 2)'
+            );
+
+            // 6. Idempotence : un nouvel import ne duplique rien.
+            $re = $results->importGuest($id, [
+                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
+            ]);
+            $this->check(
+                $re['imported'] === 0 && $re['skipped'] === 1 && count($results->history($id)) === 2,
+                'réimport : 0 importée, doublon refusé, historique inchangé (pas de duplication)'
+            );
+        } catch (Throwable $e) {
+            $this->check(false, "Contrat played_at : {$e->getMessage()}");
+        }
+    }
+
     // --- Étape 3 : refus d'accès sans authentification (niveau service) ---
 
     private function testResultAuth(): void
@@ -776,6 +858,165 @@ final class TestRunner
             $this->check(count($results->history($id)) === 0, 'Aucune donnée malformée persistée');
         } catch (Throwable $e) {
             $this->check(false, "Import malformé : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : agrégation des statistiques ---
+
+    private function testStatsAggregation(): void
+    {
+        echo "[Statistiques — agrégation]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $resultRepository = new ResultRepository($pdo);
+            $results = new ResultService($pdo, $resultRepository);
+            $stats = new StatsService($resultRepository);
+            $id = $repo->create(['login' => 'stats_agg', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // Multiplications : 4 parties réparties dans et hors fenêtres.
+            $results->save($id, 'multiplication', 10, '2026-10-27T11:00:00Z'); // 7j
+            $results->save($id, 'multiplication', 8,  '2026-10-20T11:00:00Z'); // 30j
+            $results->save($id, 'multiplication', 6,  '2026-09-28T11:00:00Z'); // 30j
+            $results->save($id, 'multiplication', 1,  '2026-09-01T00:00:00Z'); // hors 30j
+            // Addition : ne doit pas compter dans les multiplications.
+            $results->save($id, 'addition', 9, '2026-10-27T11:00:00Z');
+
+            $now = new DateTimeImmutable('2026-10-27T12:00:00Z');
+            $s = $stats->stats($id, 'multiplication', $now);
+
+            // Totaux globaux (toutes les parties du mode).
+            $this->check($s['totals']['games'] === 4, 'Totaux : 4 parties multiplications comptées');
+            $this->check($s['totals']['best_score'] === 10, 'Totaux : meilleur score = 10');
+            $this->check($s['totals']['avg_score'] === 6.3, 'Totaux : score moyen arrondi à 6.3');
+
+            // Fenêtres glissantes.
+            $this->check($s['periods']['last_7d']['games'] === 1, '7 jours : 1 partie');
+            $this->check($s['periods']['last_7d']['avg_score'] === 10.0, '7 jours : moyenne = 10');
+            $this->check($s['periods']['last_30d']['games'] === 3, '30 jours : 3 parties');
+            $this->check($s['periods']['last_30d']['avg_score'] === 8.0, '30 jours : moyenne = 8');
+
+            // Courbe : les 30 dernières parties en ordre chronologique (s4→s1).
+            $this->check(count($s['progression']) === 4, 'Courbe : 4 parties (moins de 30)');
+            $this->check($s['progression'][0]['rank'] === 1 && $s['progression'][0]['score'] === 1, 'Courbe : la plus ancienne en premier (score 1)');
+            $this->check(end($s['progression'])['score'] === 10, 'Courbe : la plus récente en dernier (score 10)');
+
+            // Histogramme : 30 jours complets, journées sans partie à 0.
+            $this->check(count($s['daily_games']) === 30, 'Histogramme : 30 jours présents');
+            $this->check($s['daily_games'][0]['day'] === '2026-09-28' && $s['daily_games'][29]['day'] === '2026-10-27', 'Histogramme : bornes de dates correctes');
+            $onlyZero = array_filter($s['daily_games'], static fn($d) => $d['games'] !== 0);
+            $this->check(count($onlyZero) === 3, 'Histogramme : seuls 3 jours ont des parties (la 4e partie est hors fenêtre 30 j, complétion à 0)');
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques agrégation : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : isolation des statistiques entre utilisateurs ---
+
+    private function testStatsIsolation(): void
+    {
+        echo "[Statistiques — isolation]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $resultRepository = new ResultRepository($pdo);
+            $results = new ResultService($pdo, $resultRepository);
+            $stats = new StatsService($resultRepository);
+
+            $a = $repo->create(['login' => 'stats_a', 'password' => 'motdepasse10', 'role' => 'user']);
+            $b = $repo->create(['login' => 'stats_b', 'password' => 'motdepasse10', 'role' => 'user']);
+            $results->save($a, 'multiplication', 10);
+            $results->save($b, 'multiplication', 2);
+
+            $sa = $stats->stats($a, 'multiplication');
+            $sb = $stats->stats($b, 'multiplication');
+
+            $this->check($sa['totals']['games'] === 1 && $sa['totals']['best_score'] === 10, 'A voit ses propres stats (1 partie)');
+            $this->check($sb['totals']['games'] === 1 && $sb['totals']['best_score'] === 2, 'B ne voit QUE ses propres stats');
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques isolation : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : regroupement journalier au fuseau Indian/Reunion (UTC+4) ---
+
+    private function testStatsReunionTimezone(): void
+    {
+        echo "[Statistiques — fuseau Indian/Reunion]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $resultRepository = new ResultRepository($pdo);
+            $results = new ResultService($pdo, $resultRepository);
+            $stats = new StatsService($resultRepository);
+            $id = $repo->create(['login' => 'stats_tz', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // 2026-10-26T20:30:00Z = 2026-10-27 00:30 heure Reunion => jour local 2026-10-27.
+            $results->save($id, 'multiplication', 10, '2026-10-26T20:30:00Z');
+
+            $now = new DateTimeImmutable('2026-10-27T12:00:00Z');
+            $s = $stats->stats($id, 'multiplication', $now);
+            $byDay = array_column($s['daily_games'], 'games', 'day');
+
+            $this->check(($byDay['2026-10-27'] ?? 0) === 1, 'Partie UTC 20:30 attribuée au jour Reunion 2026-10-27 (+4h)');
+            $this->check(($byDay['2026-10-26'] ?? 0) === 0, 'Aucune partie attribuée au 2026-10-26 (basculée au lendemain)');
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques fuseau : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : mode invalide refusé ---
+
+    private function testStatsInvalidMode(): void
+    {
+        echo "[Statistiques — mode invalide]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $stats = new StatsService(new ResultRepository($pdo));
+            $id = $repo->create(['login' => 'stats_bad', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            try {
+                $stats->stats($id, 'division');
+                $this->check(false, 'Mode invalide refusé');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'Mode invalide refusé');
+            }
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques mode invalide : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : les parties importées (invité) comptent dans les stats ---
+
+    private function testStatsIncludesImported(): void
+    {
+        echo "[Statistiques — parties importées]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $resultRepository = new ResultRepository($pdo);
+            $results = new ResultService($pdo, $resultRepository);
+            $stats = new StatsService($resultRepository);
+            $id = $repo->create(['login' => 'stats_imp', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // Une partie enregistrée + deux importées (mode invité déjà en base).
+            $results->save($id, 'multiplication', 7, '2026-10-27T10:00:00Z');
+            $results->importGuest($id, [
+                ['guest_id' => 'v12-s1', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-10-26T10:00:00Z'],
+                ['guest_id' => 'v12-s2', 'mode' => 'multiplication', 'score' => 9, 'played_at' => '2026-10-25T10:00:00Z'],
+            ]);
+
+            $s = $stats->stats($id, 'multiplication');
+            $this->check($s['totals']['games'] === 3, 'Les parties importées comptent dans le total (3)');
+            $this->check($s['totals']['best_score'] === 9, 'Le meilleur score tient compte des importées');
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques importées : {$e->getMessage()}");
         }
     }
 

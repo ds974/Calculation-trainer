@@ -24,4 +24,6 @@ tests/*.out.txt
 
 # --- Divers ---
 node_modules/
-vendor/
+# Ne pas versionner un éventuel répertoire « vendor/ » à la racine (ex. Composer),
+# mais CONSERVER public/vendor/ (bibliothèques front localisées, ex. Chart.js).
+/vendor/

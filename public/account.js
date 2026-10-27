@@ -55,11 +55,11 @@ const AccountUI = (() => {
 
   /** Synchronise l'état du module invité avec notre session mémoire. */
   function syncGuestSession() {
-    if (typeof GuestHistoryV12 !== "undefined" && GuestHistoryV12.setSession) {
+    if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.setSession) {
       if (user && csrfToken) {
-        GuestHistoryV12.setSession({ token: csrfToken, user: user });
+        window.MissionGuestHistory.setSession({ token: csrfToken, user: user });
       } else {
-        GuestHistoryV12.setSession(null);
+        window.MissionGuestHistory.setSession(null);
       }
     }
   }
@@ -128,6 +128,16 @@ const AccountUI = (() => {
     if (screenId === "accountScreen") {
       renderAccountScreen();
     }
+
+    // Statistiques personnelles (étape 6B) — module dédié (stats.js).
+    if (screenId === "statsScreen") {
+      if (typeof StatsUI !== "undefined" && StatsUI.show) StatsUI.show();
+    } else if (typeof StatsUI !== "undefined" && StatsUI.hide) {
+      // En quittant l'écran statistiques, on détruit les graphiques et on
+      // annule toute requête en vol.
+      StatsUI.hide();
+    }
+
     showScreen(screenId);
   }
 
@@ -208,8 +218,8 @@ const AccountUI = (() => {
     }
 
     let pending = 0;
-    if (typeof GuestHistoryV12 !== "undefined" && GuestHistoryV12.pendingCount) {
-      pending = GuestHistoryV12.pendingCount();
+    if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.pendingCount) {
+      pending = window.MissionGuestHistory.pendingCount();
     }
 
     const info = document.getElementById("guestImportInfo");
@@ -258,6 +268,14 @@ const AccountUI = (() => {
     await refreshProfile();
     accountReady = true;
     renderAccountBar();
+
+    // Branche la gestion des sessions expirées de l'écran statistiques (étape 6B) :
+    // en cas de 401 renvoyé par l'API stats, on réutilise le flux de compte existant.
+    if (typeof StatsUI !== "undefined" && StatsUI.setSessionHandler) {
+      StatsUI.setSessionHandler(async () => {
+        await handleSessionExpired("Votre session a expiré. Reconnectez-vous.");
+      });
+    }
   }
 
 
@@ -395,9 +413,9 @@ const AccountUI = (() => {
 
   async function handleImport() {
     clearFeedback("importFeedback");
-    if (!user || typeof GuestHistoryV12 === "undefined" || !GuestHistoryV12.importToAccount) return;
+    if (!user || typeof window.MissionGuestHistory === "undefined" || !window.MissionGuestHistory.importToAccount) return;
 
-    const pending = GuestHistoryV12.pendingCount ? GuestHistoryV12.pendingCount() : 0;
+    const pending = window.MissionGuestHistory.pendingCount ? window.MissionGuestHistory.pendingCount() : 0;
     if (pending <= 0) {
       setFeedback("importFeedback", "Aucune ancienne partie invitée à importer.", "success");
       return;
@@ -415,7 +433,7 @@ const AccountUI = (() => {
 
     const btn = document.getElementById("importGuestBtn");
     setBusy(btn, true, "Import en cours…");
-    const result = await GuestHistoryV12.importToAccount(() => true);
+    const result = await window.MissionGuestHistory.importToAccount(() => true);
     setBusy(btn, false);
 
     const resp = result.response || {};

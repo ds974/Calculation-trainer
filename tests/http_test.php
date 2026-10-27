@@ -315,10 +315,131 @@ $histBobJ = json_decode($histBob, true);
 $histBobCount = is_array($histBobJ) && is_array($histBobJ['data']['history'] ?? null) ? count($histBobJ['data']['history']) : -1;
 expect('bob ne voit pas l\'historique d\'alice', $code === 200 && $histBobCount === 0, "HTTP {$code} (nb={$histBobCount})");
 
+echo "\n=== Test HTTP — statistiques personnelles (étape 6) ===\n";
+
+// Une toute nouvelle session (jar vide) sans connexion => 401.
+$jarAnon = sys_get_temp_dir() . "/calc_trainer_jar_anon_{$port}.txt";
+[$code] = get_call("{$base}?action=stats&mode=multiplication", $jarAnon);
+expect('stats sans connexion => 401', $code === 401, "HTTP {$code}");
+register_shutdown_function(static function () use ($jarAnon): void {
+    @unlink($jarAnon);
+});
+
+// Alice, connectée : stats multiplications = 2 parties (1 save score 9 + 1 import score 7).
+[$code, $statMult] = get_call("{$base}?action=stats&mode=multiplication", $jar);
+$statMultJ = json_decode($statMult, true);
+$tm = is_array($statMultJ) ? ($statMultJ['data']['totals'] ?? null) : null;
+$validStats = is_array($tm)
+    && isset($tm['games'], $tm['avg_score'], $tm['best_score'])
+    && isset($statMultJ['data']['periods']['last_7d'], $statMultJ['data']['periods']['last_30d'])
+    && is_array($statMultJ['data']['progression'] ?? null)
+    && is_array($statMultJ['data']['daily_games'] ?? null);
+expect('stats (multiplication) connecté => 200 et structure complète', $code === 200 && $validStats, "HTTP {$code}");
+expect('stats multiplication : total = 2 parties', is_array($tm) && $tm['games'] === 2, "HTTP {$code}");
+expect('stats multiplication : meilleur score = 9 (import 7 inclus)', is_array($tm) && $tm['best_score'] === 9, "HTTP {$code}");
+expect('stats : 30 jours d\'histogramme renvoyés', is_array($statMultJ) && count($statMultJ['data']['daily_games'] ?? []) === 30, "HTTP {$code}");
+
+// Alice : stats additions = 1 partie (import score 5).
+[$code, $statAdd] = get_call("{$base}?action=stats&mode=addition", $jar);
+$statAddJ = json_decode($statAdd, true);
+$ta = is_array($statAddJ) ? ($statAddJ['data']['totals'] ?? null) : null;
+expect('stats (addition) : total = 1, meilleur = 5', $code === 200 && is_array($ta) && $ta['games'] === 1 && $ta['best_score'] === 5, "HTTP {$code}");
+
+// Mode inconnu => 400 (validation serveur).
+[$code] = get_call("{$base}?action=stats&mode=division", $jar);
+expect('stats mode inconnu => 400', $code === 400, "HTTP {$code}");
+
+// Isolation : bob, connecté mais sans résultats, voit un total à 0.
+[$code, $statBob] = get_call("{$base}?action=stats&mode=multiplication", $jarBob);
+$statBobJ = json_decode($statBob, true);
+$tb = is_array($statBobJ) ? ($statBobJ['data']['totals'] ?? null) : null;
+expect('stats bob (sans parties) => total 0, isolation respectée', $code === 200 && is_array($tb) && $tb['games'] === 0, "HTTP {$code}");
+
 // Nettoyage du cookie jar de bob (déjà géré pour l'autre jar mais bob spécifique).
 register_shutdown_function(static function () use ($jarBob): void {
     @unlink($jarBob);
 });
+
+// =====================================================================
+// Non-régression — horodatage played_at et normalisation frontend.
+// Un compte isolé (carol) pour ne pas perturber les comptes alice/bob.
+// Le frontend envoie désormais des dates STRICTES (YYYY-MM-DDTHH:mm:ssZ,
+// sans millisecondes) après normalisation ; on vérifie ici que :
+//   - une date issue de new Date().toISOString() (avec .sssZ) envoyée
+//     telle quelle est REFUSÉE par le serveur (400) ;
+//   - sa version normalisée (sans millisecondes) est acceptée (201) puis
+//     visible dans l'historique et les statistiques ;
+//   - un import dont les played_at contiennent des millisecondes est
+//     rejeté, puis accepté une fois normalisé (ce que fait les frontend) ;
+//   - un nouvel import ne duplique pas les données.
+echo "\n=== Test HTTP — horodatage played_at et normalisation frontend ===\n";
+
+$jarTs = sys_get_temp_dir() . "/calc_trainer_jar_ts_{$port}.txt";
+register_shutdown_function(static function () use ($jarTs): void {
+    @unlink($jarTs);
+});
+
+[$code, $csrfTs] = get_call("{$base}?action=auth/csrf", $jarTs);
+$csrfTsJ = json_decode($csrfTs, true);
+$tokenTs = is_array($csrfTsJ) ? (string)($csrfTsJ['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'carol', 'password' => 'secretpass123', 'csrf_token' => $tokenTs], $jarTs);
+expect('register carol => 201', $code === 201, "HTTP {$code}");
+[$code, $loginTs] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'carol', 'password' => 'secretpass123', 'csrf_token' => $tokenTs], $jarTs);
+$loginTsJ = json_decode($loginTs, true);
+expect('login carol => 200', $code === 200 && isset($loginTsJ['data']['user']), "HTTP {$code}");
+
+// 1. Date brute équivalente à new Date().toISOString() (avec millisecondes) => REFUSÉE.
+[$code] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 8,
+    'played_at' => '2026-10-27T10:00:00.123Z', 'csrf_token' => $tokenTs,
+], $jarTs);
+expect('save avec played_at=...123Z (new Date().toISOString() brut) => 400', $code === 400, "HTTP {$code}");
+
+// 2. Version normalisée (strict, sans millisecondes) => acceptée.
+[$code, $saveNorm] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 8,
+    'played_at' => '2026-10-27T10:00:00Z', 'csrf_token' => $tokenTs,
+], $jarTs);
+$saveNormJ = json_decode($saveNorm, true);
+expect('save normalisé (...Z) => 201', $code === 201 && isset($saveNormJ['data']['result']['id']), "HTTP {$code}");
+
+// 3. Un invité dont l'historique localStorage contient des played_at à
+//    millisecondes est rejeté s'il est envoyé brut…
+[$code, $impMs] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-ts1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00.456Z'],
+], 'csrf_token' => $tokenTs], $jarTs);
+$impMsJ = json_decode($impMs, true);
+expect('import avec played_at à millisecondes (brut) => 0 importée', $code === 201 && ($impMsJ['data']['imported'] ?? -1) === 0, "HTTP {$code}");
+
+// 4. …et accepté une fois sa played_at normalisée (comme le fait le frontend).
+[$code, $impNorm] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-ts1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
+], 'csrf_token' => $tokenTs], $jarTs);
+$impNormJ = json_decode($impNorm, true);
+expect('import normalisé (...Z) => 1 importée', $code === 201 && ($impNormJ['data']['imported'] ?? -1) === 1, "HTTP {$code}");
+
+// 5. Historique : 1 save + 1 import = 2 parties visibles.
+[$code, $histTs] = get_call("{$base}?action=result/history", $jarTs);
+$histTsJ = json_decode($histTs, true);
+$histTsCount = is_array($histTsJ) && is_array($histTsJ['data']['history'] ?? null) ? count($histTsJ['data']['history']) : -1;
+expect('historique carol = 2 parties (save + import normalisés)', $code === 200 && $histTsCount === 2, "HTTP {$code} (nb={$histTsCount})");
+
+// 6. Statistiques : total multiplications = 2 (save 8 + import 6).
+[$code, $statTs] = get_call("{$base}?action=stats&mode=multiplication", $jarTs);
+$statTsJ = json_decode($statTs, true);
+$tt = is_array($statTsJ) ? ($statTsJ['data']['totals'] ?? null) : null;
+expect('stats carol (multiplication) : total = 2 parties', $code === 200 && is_array($tt) && ($tt['games'] ?? -1) === 2, "HTTP {$code}");
+expect('stats carol : meilleur score = 8', is_array($tt) && ($tt['best_score'] ?? -1) === 8, "HTTP {$code}");
+
+// 7. Réimport identique => idempotent, aucun doublon (historique toujours 2).
+[$code, $impDupTs] = http_call('POST', $base, ['action' => 'result/import', 'items' => [
+    ['guest_id' => 'v12-ts1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
+], 'csrf_token' => $tokenTs], $jarTs);
+$impDupTsJ = json_decode($impDupTs, true);
+[$code, $histTs2] = get_call("{$base}?action=result/history", $jarTs);
+$histTs2J = json_decode($histTs2, true);
+$histTs2Count = is_array($histTs2J) && is_array($histTs2J['data']['history'] ?? null) ? count($histTs2J['data']['history']) : -1;
+expect('réimport => 0 importée (idempotent) et historique inchangé (2)', $code === 200 && ($impDupTsJ['data']['imported'] ?? -1) === 0 && $histTs2Count === 2, "HTTP {$code}");
 
 echo "\n=== Résumé HTTP ===\n";
 echo "Tests réussis : {$passed}\n";

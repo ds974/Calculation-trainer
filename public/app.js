@@ -608,8 +608,8 @@ function finalizeMission() {
   // En mode invité (non connecté) : stockage local dédié v12 (guest-history.js),
   // sans toucher aux clés v10/v11 ni aux classements Top 20 locaux.
   // En mode connecté : envoi au serveur (result/save), aucune donnée locale.
-  if (typeof GuestHistoryV12 !== "undefined" && GuestHistoryV12.record) {
-    GuestHistoryV12.record({
+  if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.record) {
+    window.MissionGuestHistory.record({
       mode: state.config.mode,
       score: state.score,
       playedAt: new Date().toISOString()

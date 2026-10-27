@@ -175,6 +175,58 @@ reste une exigence distincte avant toute exposition publique**, dans l'esprit de
   être vérifié côté serveur (pas de preuve anti-triche). Ces valeurs alimentent
   l'historique personnel, mais ne doivent jamais constituer une preuve formelle.
 
+### Statistiques personnelles (étape 6 — backend)
+
+- `src/StatsService.php` : calcul des agrégats par mode (`multiplication` | `addition`),
+  **uniquement** depuis l'identité de session (`user_id` jamais fourni par le client) :
+  - totaux globaux (nombre de parties, score moyen sur 10, meilleur score) ;
+  - moyennes sur fenêtres glissantes de **7** et **30 jours** (UTC, indépendantes du fuseau serveur) ;
+  - courbe des **30 dernières parties** (par récence, rendue chronologique) ;
+  - histogramme des parties par jour sur les **30 derniers jours**, regroupé selon
+    le **fuseau Indian/Reunion (UTC+4)** — chaque journée est présente (`games = 0`
+    si aucune partie), pour un tracé continu.
+- `src/ResultRepository.php` : nouvelles méthodes d'agrégation préparées
+  (`totals`, `countSince`, `periodAverage`, `recentScores`, `playedAtValues`).
+  Aucune modification du schéma SQLite. Les parties **importées** depuis le mode
+  invité résident dans la même table `results` : elles sont donc comptées.
+- Nouvelle route API (`GET`, session requise) :
+  - `stats?mode=<multiplication|addition>` : renvoie `{ mode, generated_at_utc,
+    totals, periods, progression, daily_games }` ; mode inconnu => `400`.
+
+### Interface des statistiques (étape 6B — frontend)
+
+L'écran « Mes statistiques » (`#statsScreen`) est accessible uniquement depuis
+l'espace du compte connecté (bouton « Mes statistiques » sur « Mon compte »).
+Il consomme **exclusivement** la route `GET stats?mode=...` — aucune donnée
+n'est inventée ni transmise par le navigateur (l'utilisateur est identifié par
+la session).
+
+- `public/stats.js` expose `window.StatsUI` (`show`, `hide`, `setSessionHandler`) :
+  - Sélecteur **Additions / Multiplications** ;
+  - cartes : nombre de parties, score moyen global, meilleur score, moyenne des
+    **7** et **30 derniers jours** (périodes **glissantes**) ;
+  - courbe d'évolution des **30 dernières parties** (axe des scores borné à 10) ;
+  - histogramme du nombre de parties **par jour calendaire de La Réunion (UTC+4)**
+    sur 30 jours (valeurs entières) ;
+  - état **vide** dédié (« aucune partie »), erreurs réseau / serveur avec bouton
+    « Réessayer », et gestion des **sessions expirées** : un `401` est relayé à
+    `account.js` via `setSessionHandler` (retour automatique à la connexion) ;
+  - destruction des instances Chart.js (`chart.destroy()`) à chaque changement de
+    mode, rechargement et départ de l'écran (`StatsUI.hide()`, appelé par la
+    navigation d'`account.js`).
+- `public/account.js` : branche l'écran statistiques dans sa navigation
+  (`data-account-nav="stats"`), appelle `StatsUI.show()/hide()` et enregistre le
+  gestionnaire de session expirée. Aucune modification des mécanismes
+  d'authentification.
+- `public/vendor/chart.js/` : **Chart.js v4.6.1** en **build UMD local**,
+  distribué sous **licence MIT** (voir `LICENSE.md` et `README.md` dans ce
+  dossier pour version, provenance et compatibilité CSP). Chargé en same-origin
+  avant `stats.js` ; compatible `style-src 'self'` (aucun `<style>` inline ni
+  attribut `style=""` injecté — rendu sur `<canvas>`).
+- Accessibilité : alternative textuelle (`sr-only`) pour chaque graphique, libellés
+  `aria-label` sur les `canvas`, sélecteur en `fieldset`/boutons `aria-pressed`.
+- Responsive : grille de cartes et hauteurs de graphiques adaptées aux petits écrans.
+
 ### Mode invité et historique local
 
 - `public/guest-history.js` : module autonome, exposé en `window.MissionGuestHistory`.

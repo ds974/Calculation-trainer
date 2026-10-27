@@ -396,6 +396,10 @@
         </div>
         <div id="accountSummary" class="account-summary"></div>
 
+        <div class="stats-nav-actions">
+          <button type="button" class="btn btn-primary" data-account-nav="stats">Mes statistiques</button>
+        </div>
+
         <div id="guestImportBlock" class="import-block" hidden>
           <h3>Mes anciennes parties</h3>
           <p id="guestImportInfo" class="muted"></p>
@@ -433,12 +437,37 @@
         </div>
       </div>
     </section>
+
+    <section id="statsScreen" class="screen" aria-labelledby="statsTitle">
+      <div class="panel wide-panel stats-panel">
+        <div class="section-heading">
+          <span class="section-kicker">Mes performances</span>
+          <h2 id="statsTitle">Mes statistiques</h2>
+        </div>
+
+        <fieldset class="stats-mode-select" aria-label="Choisir le type de calcul">
+          <legend class="sr-only">Type de calcul</legend>
+          <button type="button" class="stats-mode-btn is-active" data-stats-mode="multiplication"
+                  aria-pressed="true">Multiplications</button>
+          <button type="button" class="stats-mode-btn" data-stats-mode="addition"
+                  aria-pressed="false">Additions</button>
+        </fieldset>
+
+        <div id="statsContent" class="stats-content" aria-live="polite"></div>
+
+        <div class="form-actions stats-actions">
+          <button type="button" class="btn btn-secondary" data-account-nav="account">Revenir à mon compte</button>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div id="accountToast" class="account-toast" role="status" aria-live="polite" hidden></div>
 
   <script src="guest-history.js"></script>
   <script src="app.js"></script>
+  <script src="vendor/chart.js/chart.umd.min.js"></script>
+  <script src="stats.js"></script>
   <script src="account.js"></script>
 </body>
 </html>

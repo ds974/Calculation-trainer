@@ -19,6 +19,7 @@ declare(strict_types=1);
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
  *  - result/import         (POST) : import des anciennes parties invitées (connecté).
+ *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
  *
  * Sécurité : session HttpOnly/SameSite=Lax/Secure (si HTTPS), jeton CSRF
  * obligatoire pour toute opération POST, requêtes préparées, Argon2id,
@@ -56,6 +57,7 @@ try {
     $auth = new AuthService($db->pdo(), $users);
     $resultRepository = new ResultRepository($db->pdo());
     $results = new ResultService($db->pdo(), $resultRepository);
+    $stats = new StatsService($resultRepository);
 
     // Migration idempotente (non destructive) : efface toute valeur d'e-mail
     // résiduelle en base. Conserve les identifiants, mots de passe hachés,
@@ -150,6 +152,19 @@ try {
                 Response::error('Authentification requise.', 401);
             }
             Response::success(['history' => $results->history((int)$user['id'])]);
+            break;
+
+        case 'stats':
+            // Statistiques personnelles d'un mode, calculées côté serveur à partir
+            // de l'identité de session UNIQUEMENT (jamais un user_id client).
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            $mode = isset($_GET['mode']) && is_string($_GET['mode'])
+                ? $_GET['mode']
+                : (string)($parsed['mode'] ?? '');
+            Response::success($stats->stats((int)$user['id'], $mode));
             break;
 
         case 'result/import':
