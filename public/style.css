@@ -727,6 +727,8 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
 @media (max-width: 390px) {
   .secondary-actions { flex-direction: column; }
   .secondary-actions .btn, .btn-large { width: 100%; min-width: 0; }
+  /* Les icônes de navigation restent sur une même rangée même sur petit écran. */
+  .secondary-actions.icon-actions { flex-direction: row; }
   .home-card h1 { font-size: clamp(2rem, 11vw, 2.8rem); }
   .subtitle { font-size: .94rem; }
   .question-display { font-size: clamp(3.3rem, 17vw, 4.5rem); }
@@ -781,6 +783,151 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
   color: white;
 }
 .btn-danger:hover { background: #9c3438; }
+
+/* ==========================================================================
+   Boutons à icônes circulaires SVG (v12.2)
+   ========================================================================== */
+
+/* Groupe d'icônes (remplace la rangée de boutons textuels secondaires) */
+.icon-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Bouton icône : pictogramme blanc sur fond circulaire déjà inclus dans le SVG.
+   Aucun second cercle de fond n'est ajouté : le bouton est transparent et la
+   zone cliquable (52 px) reste suffisamment grande pour un usage tactile. */
+.icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 120ms ease;
+}
+.icon-btn img {
+  width: 48px;
+  height: 48px;
+  display: block;
+  border-radius: 50%;
+  user-select: none;
+  pointer-events: none;
+}
+.icon-btn:hover { transform: translateY(-1px); }
+.icon-btn:active { transform: translateY(0); }
+
+/* Focus clavier clairement visible (anneau autour de l'icône) */
+.icon-btn:focus-visible {
+  outline: 3px solid var(--primary-light);
+  outline-offset: 3px;
+}
+
+/* Infobulle affichée au survol et au focus */
+.icon-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #12313f;
+  color: #eaf2f4;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: .82rem;
+  font-weight: 650;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease, visibility 120ms ease;
+  z-index: 40;
+  box-shadow: 0 8px 22px rgba(3, 18, 28, .35);
+}
+.icon-btn::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #12313f;
+  border-bottom: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+  pointer-events: none;
+  z-index: 40;
+}
+.icon-btn:hover::after,
+.icon-btn:hover::before,
+.icon-btn:focus::after,
+.icon-btn:focus::before,
+.icon-btn:focus-visible::after,
+.icon-btn:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Si l'infobulle d'un bouton du compte dépasse à droite, on l'aligne pour
+   rester dans la fenêtre sur mobile. */
+.account-chip .icon-btn::after {
+  max-width: 40vw;
+  white-space: normal;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Panneau de navigation supérieur persistant (v12.2)
+   ========================================================================== */
+
+/*
+ * Barre sticky en haut de l'application : elle reste accessible pendant le
+ * défilement des pages longues (statistiques, administration…). Elle est
+ * masquée pendant une mission de calcul via la classe .is-hidden (appliquée
+ * par updateAccountPanelVisibility() dans app.js / account.js).
+ */
+.app-nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(16, 35, 49, .94), rgba(23, 56, 73, .9));
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(203, 221, 226, .14), 0 8px 22px rgba(3, 18, 28, .24);
+}
+.app-nav-bar.is-hidden { display: none; }
+.app-nav-bar .account-bar { margin: 0; }
+
+/* L'écran d'accueil n'a plus d'en-tête dédié (panneau global) : on conserve
+   un léger espace au-dessus de la carte. */
+.home-screen { padding-top: 28px; }
+
+@media (max-width: 560px) {
+  /* Compacte le panneau pour ne pas masquer le contenu des longues pages. */
+  .app-nav-bar {
+    padding: 8px 8px;
+  }
+  /* On masque le libellé (« Connecté : … » / « Mode invité ») sur mobile
+     pour limiter la hauteur de la barre sticky. */
+  .app-nav-bar .account-chip-label { display: none; }
+  .app-nav-bar .account-chip { padding: 8px 10px; gap: 8px; }
+}
+
+
 
 /* Écrans connectés/inscription/profil */
 #loginScreen,

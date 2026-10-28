@@ -117,6 +117,9 @@ const AccountUI = (() => {
       screen.classList.toggle("active", screen.id === screenId);
     });
     window.scrollTo({ top: 0 });
+    if (typeof updateAccountPanelVisibility === "function") {
+      updateAccountPanelVisibility();
+    }
   }
 
   /** Navigation de compte ; refuse (avec message) pendant une partie. */
@@ -154,6 +157,28 @@ const AccountUI = (() => {
 
   // ------------------------------------------------------- États et rendus
 
+  /**
+   * Crée un bouton de navigation à icône circulaire (SVG de la charte v12.2).
+   * Le libellé n'est jamais affiché : il est porté par aria-label (accessibilité)
+   * et par data-tooltip (infobulle CSS au survol / focus).
+   */
+  function createIconNavButton(label, navTarget, iconPath) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "icon-btn";
+    btn.setAttribute("aria-label", label);
+    btn.dataset.tooltip = label;
+    btn.dataset.accountNav = navTarget;
+    const img = document.createElement("img");
+    img.src = iconPath;
+    img.alt = "";
+    img.width = 48;
+    img.height = 48;
+    img.decoding = "async";
+    btn.appendChild(img);
+    return btn;
+  }
+
   function renderAccountBar() {
     const bar = document.getElementById("accountBar");
     if (!bar) return;
@@ -166,23 +191,17 @@ const AccountUI = (() => {
       const label = document.createElement("span");
       label.className = "account-chip-label";
       label.textContent = "Connecté : " + user.login;
-      const btnAccount = document.createElement("button");
-      btnAccount.type = "button";
-      btnAccount.className = "btn btn-secondary btn-small";
-      btnAccount.textContent = "Mon compte";
-      btnAccount.dataset.accountNav = "account";
-      const btnAdmin = document.createElement("button");
-      btnAdmin.type = "button";
-      btnAdmin.className = "btn btn-secondary btn-small";
-      btnAdmin.textContent = "Administration";
-      btnAdmin.dataset.accountNav = "admin";
+      const btnAccueil = createIconNavButton("Accueil", "home", "assets/icons/accueil.svg");
+      const btnAccount = createIconNavButton("Mon compte", "account", "assets/icons/compte.svg");
+      const btnStats = createIconNavButton("Mes statistiques", "stats", "assets/icons/statistiques.svg");
+      const btnAdmin = createIconNavButton("Administration", "admin", "assets/icons/administration.svg");
       btnAdmin.hidden = !(user.role === "admin");
       const btnLogout = document.createElement("button");
       btnLogout.type = "button";
       btnLogout.className = "btn btn-secondary btn-small";
       btnLogout.textContent = "Se déconnecter";
       btnLogout.dataset.accountLogout = "";
-      chip.append(label, btnAccount, btnAdmin, btnLogout);
+      chip.append(label, btnAccueil, btnAccount, btnStats, btnAdmin, btnLogout);
       bar.appendChild(chip);
     } else {
       const chip = document.createElement("div");
@@ -190,12 +209,13 @@ const AccountUI = (() => {
       const hint = document.createElement("span");
       hint.className = "account-chip-label";
       hint.textContent = "Mode invité";
+      const btnAccueil = createIconNavButton("Accueil", "home", "assets/icons/accueil.svg");
       const btnLogin = document.createElement("button");
       btnLogin.type = "button";
       btnLogin.className = "btn btn-secondary btn-small";
       btnLogin.textContent = "Se connecter / S’inscrire";
       btnLogin.dataset.accountNav = "login";
-      chip.append(hint, btnLogin);
+      chip.append(hint, btnAccueil, btnLogin);
       bar.appendChild(chip);
     }
     syncAdminAccess();

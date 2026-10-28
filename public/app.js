@@ -172,6 +172,24 @@ function showScreen(screenId) {
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("active", screen.id === screenId);
   });
+  // Le panneau de navigation supérieur est masqué pendant une mission de calcul.
+  updateAccountPanelVisibility();
+}
+
+/**
+ * Affiche / masque le panneau de navigation supérieur (v12.2).
+ * – Masqué pendant une mission (l'écran de jeu est actif) pour ne pas
+ *   perturber l'exercice.
+ * – Visible sur tous les autres écrans (accueil, paramètres, scores,
+ *   compte, statistiques, administration), y compris au défilement
+ *   grâce au positionnement sticky défini dans style.css.
+ */
+function updateAccountPanelVisibility() {
+  const panel = document.getElementById("accountNavBar");
+  if (!panel) return;
+  const game = document.getElementById("gameScreen");
+  const gameActive = !!game && game.classList.contains("active");
+  panel.classList.toggle("is-hidden", gameActive);
 }
 
 function showConfig() {

@@ -9,12 +9,10 @@
 </head>
 <body>
   <main class="app-shell">
+    <nav id="accountNavBar" class="app-nav-bar" aria-label="Navigation du compte">
+      <div id="accountBar" class="account-bar" aria-live="polite"></div>
+    </nav>
     <section id="homeScreen" class="screen active home-screen" aria-labelledby="homeTitle">
-      <header class="home-header-wrapper">
-        <div class="home-header">
-          <div id="accountBar" class="account-bar" aria-live="polite"></div>
-        </div>
-      </header>
       <div class="home-card">
         <div class="mission-mark" aria-hidden="true">
           <svg viewBox="0 0 90 90" role="img">
@@ -43,9 +41,13 @@
         <p class="subtitle" id="homeSubtitle">10 calculs, un chrono et une fusée à construire.</p>
         <div class="home-actions">
           <button class="btn btn-primary btn-large" data-action="start">Lancer une mission</button>
-          <div class="secondary-actions">
-            <button class="btn btn-secondary" data-action="config">Paramètres</button>
-            <button class="btn btn-secondary" data-action="leaderboard">Tableau des scores</button>
+          <div class="secondary-actions icon-actions" aria-label="Navigation secondaire">
+            <button type="button" class="icon-btn" data-action="config" aria-label="Paramètres" data-tooltip="Paramètres">
+              <img src="assets/icons/parametres.svg" alt="" width="48" height="48">
+            </button>
+            <button type="button" class="icon-btn" data-action="leaderboard" aria-label="Tableau des scores" data-tooltip="Tableau des scores">
+              <img src="assets/icons/scores.svg" alt="" width="48" height="48">
+            </button>
           </div>
         </div>
       </div>
@@ -395,10 +397,6 @@
           <h2 id="accountTitle">Mon compte</h2>
         </div>
         <div id="accountSummary" class="account-summary"></div>
-
-        <div class="stats-nav-actions">
-          <button type="button" class="btn btn-primary" data-account-nav="stats">Mes statistiques</button>
-        </div>
 
         <div id="guestImportBlock" class="import-block" hidden>
           <h3>Mes anciennes parties</h3>
