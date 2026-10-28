@@ -144,6 +144,14 @@ final class Database
             $pdo->exec('ALTER TABLE results ADD COLUMN guest_id TEXT');
         }
 
+        // Migration v12.3 (idempotente, non destructive) : type de questions.
+        // 'classic' = classique (résultat manquant), 'hole' = à trou, 'mixed' = mélange.
+        // Les résultats enregistrés avant cette version sont par défaut 'classic'.
+        if (is_array($resultsCols) && !in_array('question_type', $resultsCols, true)) {
+            $pdo->exec("ALTER TABLE results ADD COLUMN question_type TEXT NOT NULL DEFAULT 'classic'
+                        CHECK (question_type IN ('classic', 'hole', 'mixed'))");
+        }
+
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_mode ON results(mode)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_played ON results(played_at)');

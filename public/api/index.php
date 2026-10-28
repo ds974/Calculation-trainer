@@ -150,7 +150,8 @@ try {
                 (int)$user['id'],
                 (string)($parsed['mode'] ?? ''),
                 (int)($parsed['score'] ?? -1),
-                $playedAt
+                $playedAt,
+                (string)($parsed['question_type'] ?? 'classic')
             );
             Response::success(['result' => ['id' => $resultId]], 201);
             break;

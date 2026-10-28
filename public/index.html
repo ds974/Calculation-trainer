@@ -76,6 +76,24 @@
           </div>
         </fieldset>
 
+        <fieldset class="config-group">
+          <legend>Type de questions</legend>
+          <div class="mode-selector" role="radiogroup" aria-label="Type de questions">
+            <label class="mode-option">
+              <input type="radio" name="questionTypeChoice" value="classic" data-question-type-option checked>
+              <span class="mode-chip" data-tooltip="Le résultat manquant, comme d’habitude.">Classique</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="questionTypeChoice" value="hole" data-question-type-option>
+              <span class="mode-chip" data-tooltip="Un des deux nombres (ou le résultat) est caché.">À trou</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="questionTypeChoice" value="mixed" data-question-type-option>
+              <span class="mode-chip" data-tooltip="Mélange : moitié Classique, moitié À trou.">Mélange</span>
+            </label>
+          </div>
+        </fieldset>
+
         <fieldset id="multConfigBlock" class="config-group">
           <legend>Tables utilisées</legend>
           <div id="tableCheckboxes" class="table-grid"></div>
@@ -132,6 +150,7 @@
                 <th>Prénom</th>
                 <th>Score</th>
                 <th>Temps</th>
+                <th data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)">À trou</th>
                 <th id="leaderboardDetailHeader">Tables utilisées</th>
               </tr>
             </thead>
@@ -308,7 +327,7 @@
 
         <div class="result-actions">
           <button class="btn btn-primary" data-action="restart">Nouvelle partie</button>
-          <button class="btn btn-secondary" data-action="save-home">Enregistrer et revenir à l’accueil</button>
+          <button class="btn btn-secondary" data-action="save-home">Retourner à l’accueil</button>
         </div>
 
         <h3>Top 20 des scores</h3>
@@ -320,6 +339,7 @@
                 <th>Prénom</th>
                 <th>Score</th>
                 <th>Temps</th>
+                <th data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)">À trou</th>
                 <th id="resultLeaderboardDetailHeader">Tables utilisées</th>
               </tr>
             </thead>

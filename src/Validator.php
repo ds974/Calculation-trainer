@@ -69,6 +69,16 @@ final class Validator
     }
 
     /**
+     * Valide le type de questions d'un résultat (v12.3).
+     *
+     * @return true si le type est valide (classic | hole | mixed).
+     */
+    public static function questionType(string $questionType): bool
+    {
+        return in_array($questionType, ['classic', 'hole', 'mixed'], true);
+    }
+
+    /**
      * Normalise une valeur d'activation de compte en booléen strict.
      * Accepte true/false (bool), 1/0 (int) et leurs formes numériques en chaîne.
      *

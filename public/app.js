@@ -32,8 +32,31 @@ const MODES = {
 
 const QUESTION_COUNT = 10;
 
+// Durée (ms) d'affichage de la correction pédagogique après une réponse
+// incorrecte ou un temps écoulé (v12.3). La transition reste brève (700 ms)
+// après une bonne réponse, où aucune correction n'est nécessaire.
+const QUESTION_CORRECTION_MS = 4000;
+
+// QUESTION_TYPES centralise les trois types de questions (v12.3) : le libellé
+// d'affichage et la valeur interne. Toute nouvelle forme de question s'ajoutera ici.
+const QUESTION_TYPES = {
+  classic: {
+    key: "classic",
+    label: "Classique"
+  },
+  hole: {
+    key: "hole",
+    label: "À trou"
+  },
+  mixed: {
+    key: "mixed",
+    label: "Mélange"
+  }
+};
+
 const DEFAULT_CONFIG = {
   mode: "mult",
+  questionType: "classic",
   timePerQuestion: 5,
   mult: { tables: [2,3,4,5,6,7,8,9] },
   add: { min: 1, max: 20 }
@@ -99,6 +122,52 @@ function computeAnswer(q) {
   return mode.compute(q.a, q.b);
 }
 
+/**
+ * Réponse attendue pour une question, indépendamment de la position du trou (v12.3).
+ *  - question classique : le résultat du calcul  a (symbole) b = ? ;
+ *  - trou en première position (? (symbole) b = résultat) : la réponse est `a` ;
+ *  - trou en deuxième position (a (symbole) ? = résultat) : la réponse est `b`.
+ */
+function questionAnswer(q) {
+  if (q && q.hole === "a") return q.a;
+  if (q && q.hole === "b") return q.b;
+  return computeAnswer(q);
+}
+
+/**
+ * Texte affiché pour une question, selon que l'opérande manquant se trouve en
+ * première ou deuxième position, ou qu'il s'agisse d'une question classique.
+ */
+function questionDisplay(q) {
+  const symbol = operatorSymbol(q.mode);
+  if (q.hole === "a") return `? ${symbol} ${q.b} = ${computeAnswer(q)}`;
+  if (q.hole === "b") return `${q.a} ${symbol} ? = ${computeAnswer(q)}`;
+  return `${q.a} ${symbol} ${q.b} = ?`;
+}
+
+/**
+ * HTML de l'équation corrigée, affichée DANS la zone de question pendant la
+ * correction (v12.3). La bonne réponse remplace visuellement le « ? » à son
+ * emplacement exact — quel que soit le type de question — et est rendue en rouge
+ * via la classe « answer-reveal » (qui ajoute aussi un signal non chromatique).
+ *
+ *  - classique : `3 × 6 = ?`  -> `3 × 6 = <span class="answer-reveal">18</span>`
+ *  - trou (a)  : `? × 6 = 18` -> `<span class="answer-reveal">3</span> × 6 = 18`
+ *  - trou (b)  : `3 × ? = 18` -> `3 × <span class="answer-reveal">6</span> = 18`
+ *
+ * La bonne réponse n'apparaît qu'une seule fois (dans l'équation) : le message
+ * de retour (feedback) ne la répète pas. Fonction PURE (aucun accès au DOM),
+ * donc facilement testable.
+ */
+function questionCorrectionHTML(q) {
+  const symbol = operatorSymbol(q.mode);
+  const answer = computeAnswer(q);
+  const reveal = (v) => `<span class="answer-reveal" aria-label="réponse : ${v}">${v}</span>`;
+  if (q.hole === "a") return `${reveal(q.a)} ${symbol} ${q.b} = ${answer}`;
+  if (q.hole === "b") return `${q.a} ${symbol} ${reveal(q.b)} = ${answer}`;
+  return `${q.a} ${symbol} ${q.b} = ${reveal(answer)}`;
+}
+
 function operatorSymbol(modeKey = state.config.mode) {
   const mode = MODES[modeKey] || MODES[DEFAULT_CONFIG.mode];
   return mode.symbol;
@@ -118,7 +187,7 @@ function bindAnswerInput() {
     if (value === "") return;
 
     const q = state.questions[state.currentIndex];
-    if (Number(value) === computeAnswer(q)) {
+    if (Number(value) === questionAnswer(q)) {
       finishQuestion(true, Number(value));
     }
   });
@@ -132,7 +201,7 @@ function bindAnswerInput() {
       if (value === "") return;
       const q = state.questions[state.currentIndex];
       const numericValue = Number(value);
-      if (numericValue !== computeAnswer(q)) finishQuestion(false, numericValue);
+      if (numericValue !== questionAnswer(q)) finishQuestion(false, numericValue);
       return;
     }
 
@@ -210,6 +279,12 @@ function buildConfigControls() {
     radio.addEventListener("change", handleModeChange);
   });
 
+  // v12.3 — sélecteur du type de questions (Classique / À trou / Mélange).
+  document.querySelectorAll("[data-question-type-option]").forEach((radio) => {
+    radio.checked = radio.value === state.config.questionType;
+    radio.addEventListener("change", handleQuestionTypeChange);
+  });
+
   buildTableCheckboxes();
   buildRangeInputs();
 
@@ -260,6 +335,9 @@ function syncConfigControls() {
   document.querySelectorAll("[data-mode-option]").forEach((radio) => {
     radio.checked = radio.value === state.config.mode;
   });
+  document.querySelectorAll("[data-question-type-option]").forEach((radio) => {
+    radio.checked = radio.value === state.config.questionType;
+  });
   document.querySelectorAll("#tableCheckboxes input[type='checkbox']").forEach((checkbox) => {
     checkbox.checked = state.config.mult.tables.includes(Number(checkbox.value));
   });
@@ -284,6 +362,15 @@ function handleModeChange(event) {
   saveConfig();
   syncConfigControls();
   updateHomeTitle();
+}
+
+// v12.3 — mise à jour du type de questions (classique / à trou / mélange).
+function handleQuestionTypeChange(event) {
+  const value = event.target.value;
+  if (!QUESTION_TYPES[value]) return;
+  state.config.questionType = value;
+  saveConfig();
+  syncConfigControls();
 }
 
 // Met à jour le titre de l'accueil et la description selon le mode choisi.
@@ -405,6 +492,7 @@ function validateQuestionPool() {
 
 function generateUniqueQuestions() {
   const mode = state.config.mode;
+  const questionType = state.config.questionType;
   let pool;
 
   if (mode === "add") {
@@ -431,7 +519,35 @@ function generateUniqueQuestions() {
 
   // Fisher-Yates : chaque couple n'apparaît qu'une seule fois dans la mission.
   shuffleArray(pool);
-  return pool.slice(0, QUESTION_COUNT);
+  const selected = pool.slice(0, QUESTION_COUNT);
+
+  // Répartition des trous selon le type de questions (v12.3).
+  //  - classique : aucune question à trou ;
+  //  - à trou     : toutes les questions ont un trou (position aléatoire) ;
+  //  - mélange    : répartition équilibrée classique/à-trou (au plus un écart si impair),
+  //                 position du trou aléatoire pour les questions à trou.
+  if (questionType === "hole") {
+    selected.forEach((q) => {
+      q.hole = Math.random() < 0.5 ? "a" : "b";
+    });
+    return selected;
+  }
+
+  if (questionType === "mixed") {
+    const half = Math.round(QUESTION_COUNT / 2);
+    const holeCount = half; // 10 questions => 5 à trou, 5 classiques (écart 0)
+    let placedHoles = 0;
+    while (placedHoles < holeCount && placedHoles < selected.length) {
+      const idx = Math.floor(Math.random() * selected.length);
+      if (selected[idx].hole) continue;
+      selected[idx].hole = Math.random() < 0.5 ? "a" : "b";
+      placedHoles++;
+    }
+    return selected;
+  }
+
+  // classique (défaut) : aucune question à trou.
+  return selected;
 }
 
 function shuffleArray(array) {
@@ -454,7 +570,7 @@ function presentQuestion() {
 
   document.getElementById("progressText").textContent = `Question ${state.currentIndex + 1} / 10`;
   document.getElementById("missionProgressBar").style.width = `${((state.currentIndex + 1) / 10) * 100}%`;
-  document.getElementById("question").textContent = `${q.a} ${operatorSymbol(q.mode)} ${q.b}`;
+  document.getElementById("question").textContent = questionDisplay(q);
   answer.value = "";
   answer.disabled = false;
   feedback.textContent = "";
@@ -500,6 +616,7 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
     a: q.a,
     b: q.b,
     mode: q.mode,
+    hole: q.hole || null,
     correctAnswer: computeAnswer(q),
     userAnswer,
     correct: isCorrect,
@@ -511,17 +628,25 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
   answer.disabled = true;
 
   const feedback = document.getElementById("feedback");
-  const symbol = operatorSymbol(q.mode);
-  const correctAnswer = computeAnswer(q);
+  const questionEl = document.getElementById("question");
   if (isCorrect) {
-    feedback.textContent = `Bravo ! ${q.a} ${symbol} ${q.b} = ${correctAnswer}`;
+    // Réponse juste : pas de correction nécessaire, transition brève inchangée.
+    // La bonne réponse n'est pas répétée (elle tient lieu du « ? » de l'équation).
+    feedback.textContent = "Bravo !";
     feedback.className = "feedback correct";
   } else {
-    feedback.textContent = `${timedOut ? "Temps écoulé" : "Faux"} — ${q.a} ${symbol} ${q.b} = ${correctAnswer}`;
+    // Réponse incorrecte / temps écoulé : on remplace le « ? » de l'équation par
+    // la bonne réponse (rendue en rouge) DANS la zone de question, pendant une
+    // pause pédagogique de QUESTION_CORRECTION_MS ms. Le feedback n'affiche
+    // qu'un message court, sans redoubler la réponse.
+    questionEl.innerHTML = questionCorrectionHTML(q);
+    feedback.textContent = timedOut ? "Temps écoulé" : "Réponse incorrecte";
     feedback.className = "feedback incorrect";
   }
 
-  const delay = isCorrect ? 700 : 1000;
+  // Le chronomètre et le timeout ont déjà été stoppés par clearQuestionTimers()
+  // ci-dessus : la correction s'affiche sans que le compte à rebours ne tourne.
+  const delay = isCorrect ? 700 : QUESTION_CORRECTION_MS;
   setTimeout(() => {
     state.currentIndex += 1;
     presentQuestion();
@@ -617,6 +742,7 @@ function finalizeMission() {
     score: state.score,
     time: totalTime,
     mode,
+    questionType: state.config.questionType,
     tables: mode === "add" ? [] : [...state.config.mult.tables].sort((a, b) => a - b),
     range: mode === "add" ? range : ""
   };
@@ -676,7 +802,10 @@ function renderDebrief() {
 
     const calculation = document.createElement("td");
     calculation.className = "calculation-cell";
-    calculation.textContent = `${item.a} ${operatorSymbol(item.mode)} ${item.b} = ${item.correctAnswer}`;
+    // Correction : affiche l'équation complète (opérandes révélés et résultat),
+    // même pour une question à trou dont l'opérande manquant est ainsi explicité.
+    calculation.textContent =
+      `${item.a} ${operatorSymbol(item.mode)} ${item.b} = ${item.correctAnswer}`;
 
     const status = document.createElement("td");
     status.className = item.correct ? "status-ok" : "status-wrong";
@@ -726,6 +855,7 @@ async function saveConnectedResult() {
     if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.record) {
       res = await window.MissionGuestHistory.record({
         mode: state.config.mode,
+        questionType: state.finalScore.questionType || "classic",
         score: state.score,
         playedAt: new Date().toISOString()
       });
@@ -796,6 +926,7 @@ function addAccountResultToLeaderboard() {
     score: state.finalScore.score,
     time: state.finalScore.time,
     mode: state.finalScore.mode,
+    questionType: state.finalScore.questionType || "classic",
     tables: [...state.finalScore.tables],
     range: state.finalScore.range || "",
     date: new Date().toISOString()
@@ -843,6 +974,7 @@ async function saveCurrentScoreOnce() {
     score: state.finalScore.score,
     time: state.finalScore.time,
     mode: state.finalScore.mode,
+    questionType: state.finalScore.questionType || "classic",
     tables: [...state.finalScore.tables],
     range: state.finalScore.range || "",
     date: new Date().toISOString()
@@ -911,6 +1043,22 @@ function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
     const time = document.createElement("td");
     time.textContent = `${Number(entry.time).toFixed(1)} s`;
 
+    // v12.3 — colonne « Questions à trou » : Non (mission classique) ou Oui
+    // (mission à trou / mélange). Une infobulle précise le mode exact pour Oui.
+    const holeCell = document.createElement("td");
+    holeCell.className = "hole-cell";
+    const mixedOrHole = entry.questionType === "hole" || entry.questionType === "mixed";
+    if (mixedOrHole) {
+      holeCell.textContent = "Oui";
+      const tooltipLabel = (QUESTION_TYPES[entry.questionType] || {}).label || entry.questionType;
+      holeCell.setAttribute(
+        "data-tooltip",
+        `Mode : ${tooltipLabel}`
+      );
+    } else {
+      holeCell.textContent = "Non";
+    }
+
     const detail = document.createElement("td");
     if (isAdd) {
       detail.textContent = entry.range ? entry.range : "—";
@@ -920,7 +1068,7 @@ function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
 
     if (isAdd) detail.classList.add("range-cell");
 
-    row.append(name, score, time, detail);
+    row.append(name, score, time, holeCell, detail);
     tbody.appendChild(row);
   });
 }
@@ -958,8 +1106,13 @@ function normalizeScore(entry) {
   }
 
   if (!name || !Number.isFinite(score) || !Number.isFinite(time)) return null;
+
+  // v12.3 — type de questions : classique par défaut (les scores sauvegardés
+  // avant cette version n'ont pas ce champ).
+  const questionType = QUESTION_TYPES[entry.questionType] ? entry.questionType : "classic";
+
   return {
-    name, score, time, mode, tables, range,
+    name, score, time, mode, questionType, tables, range,
     date: entry.date || "",
     // Marqueur « compte connecté » : une entrée d'invité n'a pas ce drapeau.
     account: entry.account === true
@@ -1060,7 +1213,13 @@ function normalizeConfig(config) {
   if (!Number.isFinite(timePerQuestion)) timePerQuestion = DEFAULT_CONFIG.timePerQuestion;
   timePerQuestion = Math.min(60, Math.max(1, Math.round(timePerQuestion * 10) / 10));
 
-  return { mode, timePerQuestion, mult: { tables }, add: { min, max } };
+  // v12.3 — type de questions (classique par défaut, préservé pour les configs
+  // antérieures qui ne possèdent pas ce réglage).
+  const questionType = QUESTION_TYPES[config?.questionType]
+    ? config.questionType
+    : DEFAULT_CONFIG.questionType;
+
+  return { mode, questionType, timePerQuestion, mult: { tables }, add: { min, max } };
 }
 
 function saveConfig() {

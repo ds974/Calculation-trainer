@@ -926,7 +926,7 @@ final class TestRunner
             $rid = $results->save($id, 'multiplication', 9);
             $this->check($rid > 0, 'Enregistrement d\'un résultat valide (multiplication, 9/10)');
 
-            $rid2 = $results->save($id, 'addition', 7, '2026-01-15T10:20:30Z');
+            $rid2 = $results->save($id, 'addition', 7, '2026-01-15T10:20:30Z', 'hole');
             $this->check($rid2 > 0, 'Enregistrement avec date de fin UTC explicite');
 
             $history = $results->history($id);
@@ -935,6 +935,16 @@ final class TestRunner
             $this->check(
                 ($row['score'] ?? -1) === 9 && ($row['mode'] ?? '') === 'multiplication',
                 'Historique ordonné (plus récent d\'abord) et champs corrects'
+            );
+            // v12.3 — le type de questions est persisté : par défaut 'classic'
+            // (partie sans question_type explicite), et 'hole' pour la seconde.
+            $this->check(
+                ($row['question_type'] ?? '') === 'classic',
+                'question_type par défaut « classic » dans l\'historique'
+            );
+            $this->check(
+                ($history[1]['question_type'] ?? '') === 'hole',
+                'question_type « hole » persisté et restitué'
             );
             $this->check(!isset($row['user_id']), 'Historique sans données sensibles (user_id non exposé)');
         } catch (Throwable $e) {
@@ -972,6 +982,16 @@ final class TestRunner
                 }
             }
             $this->check($rejected === count($attempts), 'Refus des modes et scores invalides');
+
+            // v12.3 — un type de questions inconnu est refusé.
+            $badTypeRejected = false;
+            try {
+                $results->save($id, 'multiplication', 5, null, 'trou');
+            } catch (InvalidArgumentException) {
+                $badTypeRejected = true;
+            }
+            $this->check($badTypeRejected, 'Refus d\'un type de questions invalide');
+
             $this->check(count($results->history($id)) === 0, 'Aucun résultat invalide persistant');
         } catch (Throwable $e) {
             $this->check(false, "Validation : {$e->getMessage()}");

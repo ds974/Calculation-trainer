@@ -306,6 +306,19 @@ input:focus {
   color: #1c2f38;
   text-shadow: 0 1px 0 white;
 }
+/* v12.3 — bonne réponse révélée dans l'équation pendant la correction.
+   Rouge contrasté (--danger, ~5.4:1 sur fond clair) + soulignement = signal qui
+   ne repose pas uniquement sur la couleur. min-width réduit le décalage d'affichage
+   quand un « ? » (1 caractère) devient un nombre à 1-2 chiffres. */
+.answer-reveal {
+  display: inline-block;
+  min-width: 1.15em;
+  text-align: center;
+  color: var(--danger);
+  text-decoration: underline;
+  text-decoration-thickness: .045em;
+  text-underline-offset: .12em;
+}
 .answer-input {
   width: min(220px, 72vw);
   text-align: center;

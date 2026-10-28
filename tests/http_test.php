@@ -264,6 +264,11 @@ expect('result/save mode invalide => 400', $code === 400, "HTTP {$code}");
 [$code] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'addition', 'score' => 14, 'csrf_token' => $token3], $jar);
 expect('result/save score invalide => 400', $code === 400, "HTTP {$code}");
 
+// v12.3 — un type de questions inconnu est refusé (validation serveur) => 400,
+// sans écrire de partie.
+[$code] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'multiplication', 'score' => 7, 'question_type' => 'trou', 'csrf_token' => $token3], $jar);
+expect('result/save question_type invalide => 400', $code === 400, "HTTP {$code}");
+
 // Historique : alice doit voir 1 résultat.
 [$code, $histBody] = get_call("{$base}?action=result/history", $jar);
 $hist = json_decode($histBody, true);
@@ -388,6 +393,26 @@ $statTsJ = json_decode($statTs, true);
 $tt = is_array($statTsJ) ? ($statTsJ['data']['totals'] ?? null) : null;
 expect('stats carol (multiplication) : total = 1 partie', $code === 200 && is_array($tt) && ($tt['games'] ?? -1) === 1, "HTTP {$code}");
 expect('stats carol : meilleur score = 8', is_array($tt) && ($tt['best_score'] ?? -1) === 8, "HTTP {$code}");
+
+// v12.3 — type de questions via l'API, sur un compte isolé (carol) :
+//   - un type valide (« hole ») est enregistré (201) et restitué dans l'historique ;
+//   - le défaut (« classic ») reste appliqué aux parties sans question_type.
+[$code, $saveHole] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'addition', 'score' => 6,
+    'question_type' => 'hole', 'csrf_token' => $tokenTs,
+], $jarTs);
+expect('save question_type « hole » (connecté) => 201', $code === 201 && isset(json_decode($saveHole, true)['data']['result']['id']), "HTTP {$code}");
+[$code, $histQ] = get_call("{$base}?action=result/history", $jarTs);
+$histQJ = json_decode($histQ, true);
+$histQList = is_array($histQJ) ? ($histQJ['data']['history'] ?? []) : [];
+$holeRow = null;
+$classicRow = null;
+foreach ($histQList as $r) {
+    if (($r['question_type'] ?? '') === 'hole') $holeRow = $r;
+    if (($r['question_type'] ?? '') === 'classic') $classicRow = isset($classicRow) ? $classicRow : $r;
+}
+expect('historique restitue question_type « hole »', $code === 200 && is_array($holeRow), "HTTP {$code}");
+expect('historique par défaut question_type « classic »', is_array($classicRow), "HTTP {$code}");
 
 echo "\n=== Test HTTP — administration (v12.1) ===\n";
 

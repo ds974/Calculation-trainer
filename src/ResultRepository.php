@@ -24,6 +24,7 @@ final class ResultRepository
      * @param int    $score    score sur 10.
      * @param ?string $playedAt date/heure UTC (format 'Y-m-d\TH:i:s\Z'), sinon SQLite 'now'.
      * @param ?string $guestId  identifiant d'origine (partie invitée), sinon null.
+     * @param string $questionType type de questions (v12.3) : classic | hole | mixed.
      * @return int identifiant de la ligne insérée.
      */
     public function insert(
@@ -31,20 +32,22 @@ final class ResultRepository
         string $mode,
         int $score,
         ?string $playedAt = null,
-        ?string $guestId = null
+        ?string $guestId = null,
+        string $questionType = 'classic'
     ): int {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO results (user_id, mode, score, played_at, guest_id)
+            'INSERT INTO results (user_id, mode, score, played_at, guest_id, question_type)
              VALUES (:user_id, :mode, :score,
                      COALESCE(:played_at, strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\')),
-                     :guest_id)'
+                     :guest_id, :question_type)'
         );
         $stmt->execute([
-            'user_id'   => $userId,
-            'mode'      => $mode,
-            'score'     => $score,
-            'played_at' => $playedAt,
-            'guest_id'  => $guestId,
+            'user_id'       => $userId,
+            'mode'          => $mode,
+            'score'         => $score,
+            'played_at'     => $playedAt,
+            'guest_id'      => $guestId,
+            'question_type' => $questionType,
         ]);
         return (int)$this->pdo->lastInsertId();
     }
@@ -57,7 +60,7 @@ final class ResultRepository
     public function findByUser(int $userId, int $limit = 200): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, mode, score, played_at
+            'SELECT id, mode, score, played_at, question_type
              FROM results
              WHERE user_id = :user_id
              ORDER BY played_at DESC, id DESC

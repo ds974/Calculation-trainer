@@ -37,13 +37,22 @@ final class ResultService
      * @param string $mode   mode de jeu ('multiplication' | 'addition').
      * @param int    $score  score sur 10.
      * @param ?string $playedAt date/heure UTC de fin ; null => maintenant (UTC).
+     * @param string $questionType type de questions (v12.3) : classic | hole | mixed.
      * @return int identifiant du résultat enregistré.
-     * @throws InvalidArgumentException si mode ou score invalide.
+     * @throws InvalidArgumentException si mode, type de questions ou score invalide.
      */
-    public function save(int $userId, string $mode, int $score, ?string $playedAt = null): int
-    {
+    public function save(
+        int $userId,
+        string $mode,
+        int $score,
+        ?string $playedAt = null,
+        string $questionType = 'classic'
+    ): int {
         if (!Validator::mode($mode)) {
             throw new InvalidArgumentException('Mode de jeu invalide.');
+        }
+        if (!Validator::questionType($questionType)) {
+            throw new InvalidArgumentException('Type de questions invalide.');
         }
         if (!Validator::score($score)) {
             throw new InvalidArgumentException('Le score doit être un entier entre 0 et 10.');
@@ -51,7 +60,7 @@ final class ResultService
         if ($playedAt !== null && !$this->isUtcTimestamp($playedAt)) {
             throw new InvalidArgumentException('Date de fin invalide (format UTC attendu).');
         }
-        return $this->results->insert($userId, $mode, $score, $playedAt);
+        return $this->results->insert($userId, $mode, $score, $playedAt, null, $questionType);
     }
 
     /**

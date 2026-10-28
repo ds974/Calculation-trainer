@@ -1,4 +1,4 @@
-# Mission Calcul Mental — Version 12 (comptes utilisateurs, statistiques, administration)
+# Mission Calcul Mental — Version 12.3 (comptes, statistiques, administration, questions à trou)
 
 Application pédagogique de calcul mental (multiplications et additions), 10 questions
 par mission, chronomètre et animation de fusée.
@@ -7,6 +7,17 @@ La **v12** ajoute une gestion de comptes utilisateurs, un historique des résult
 des statistiques et une interface d'administration, reposant sur un backend **PHP 8.2+**
 et une base **SQLite**, tout en conservant intégralement les fonctionnalités de la **v11**
 (mode invité, classements locaux Top 20, paramètres, fusée, etc.).
+
+La **v12.3** ajoute le **type de questions** (classique, à trou, ou mélange) : une question
+à trou masque le 1er ou le 2e opérande (`? × 6 = 18`), le mode **Mélange** alterne aléatoirement
+questions classiques et à trou, et le type de questions est persisté (localStorage + SQLite)
+puis affiché dans le classement (« À trou »).
+
+La **v12.3** améliore aussi le **retour pédagogique** après une réponse incorrecte ou un temps
+écoulé : la bonne réponse est révélée **dans l'équation** à l'emplacement exact du « ? »
+(`3 × 6 = 18` avec le *18* en rouge, `? × 6 = 18` → `3 × 6 = 18`, etc.), le chronomètre est
+arrêté, la saisie est verrouillée et la correction reste affichée **4 secondes** avant de
+passer à la question suivante. La transition reste brève (700 ms) après une bonne réponse.
 
 ---
 
@@ -91,6 +102,23 @@ schéma, unicité des logins (insensible à la casse), hachage/vérification Arg
 refus de recréer un administrateur existant. Un test n'est déclaré **réussi** que s'il a
 été réellement exécuté sans erreur.
 
+Le flux **API HTTP** de bout en bout (server intégré sur un port libre, sessions, CSRF,
+résultats/classement) se teste séparément, toujours sur une base jetable :
+
+```bash
+php tests/http_test.php
+```
+
+Les **tests JavaScript** (via JavaScript for Automation, sans Node) valident côté client la
+normalisation des dates (historique invité) et le **retour pédagogique** de la v12.3
+(révélation de la bonne réponse dans l'équation, durée de correction de 4 s, absence de
+double affichage et verrouillage de la saisie) :
+
+```bash
+osascript -l JavaScript tests/js_normalization_test.js
+osascript -l JavaScript tests/js_correction_test.js
+```
+
 ---
 
 ## Démarrage local (serveur de développement)
@@ -168,7 +196,8 @@ reste une exigence distincte avant toute exposition publique**, dans l'esprit de
   Validation côté serveur (mode, score sur 10, horodatage UTC), transaction SQLite
   pour l'import, refus des données malformées sans écriture partielle.
 - Nouvelles routes API (toutes soumises à session + CSRF pour les POST) :
-  - `result/save`    (POST) : enregistre une partie terminée (mode, score, played_at).
+  - `result/save`    (POST) : enregistre une partie terminée (mode, score, played_at,
+    `question_type` — `classic` | `hole` | `mixed`, défaut `classic`).
   - `result/history` (GET)  : historique de l'utilisateur connecté.
   - `result/import`  (POST) : import volontaire et idempotent de l'historique invité.
 - **Limite de confiance** : le score est transmis par le navigateur ; il ne peut pas
@@ -226,6 +255,23 @@ la session).
 - Accessibilité : alternative textuelle (`sr-only`) pour chaque graphique, libellés
   `aria-label` sur les `canvas`, sélecteur en `fieldset`/boutons `aria-pressed`.
 - Responsive : grille de cartes et hauteurs de graphiques adaptées aux petits écrans.
+
+### Questions « à trou » (v12.3)
+
+- Trois **types de questions** configurables (fieldset « Type de questions » dans la config) :
+  - **Classique** : aucune question à trou (`3 × 6 = ?`) — comportement historique, défaut.
+  - **À trou** : toutes les questions masquent un opérande (`? × 6 = 18` ou `3 × ? = 18`),
+    position aléatoire (1er ou 2e opérande).
+  - **Mélange** : répartition équilibrée (~50 % classiques / ~50 % à trou, écart nul sur
+    10 questions), positions aléatoires.
+- Répartition des trous faite dans `generateUniqueQuestions()` (app.js) ; chaque question
+  porte un champ `hole` (`"a"` = 1er opérande, `"b"` = 2e, `null` = classique).
+- Affichage via `questionDisplay()` et validation via `questionAnswer()` (la bonne réponse
+  est l'opérande masqué) ; le débrief révèle toujours l'équation complète des deux opérandes.
+- Le type de questions est persisté **en localStorage** (`questionType` dans la config) et
+  **en SQLite** (colonne `question_type` de `results`, contrainte CHECK, migration idempotente).
+- Le type est transmis à `result/save` (`question_type`) et affiché dans le classement
+  (colonne « À trou » : Oui pour `hole`/`mixed`, Non pour `classic`).
 
 ### Mode invité et historique local
 

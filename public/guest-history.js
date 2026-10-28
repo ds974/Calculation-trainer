@@ -122,9 +122,17 @@ const GuestHistoryV12 = (() => {
   async function record(part) {
     const mode = serverMode(part.mode);
     const playedAt = toUtcSecondsIso(part.playedAt);
+    const questionType = part.questionType === "hole" || part.questionType === "mixed"
+      ? part.questionType
+      : "classic";
 
     if (session) {
-      const res = await api("result/save", { mode, score: part.score, played_at: playedAt });
+      const res = await api("result/save", {
+        mode,
+        score: part.score,
+        played_at: playedAt,
+        question_type: questionType,
+      });
       return { server: true, ok: res.ok };
     }
 
@@ -133,6 +141,7 @@ const GuestHistoryV12 = (() => {
       mode: mode,
       score: part.score,
       played_at: playedAt,
+      question_type: questionType,
     };
     const all = loadAll();
     all.push(entry);
