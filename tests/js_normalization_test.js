@@ -7,9 +7,10 @@
 //
 // Il charge le fichier réel public/guest-history.js (ce qui valide au passage
 // sa syntaxe), puis vérifie que la fonction commune toUtcSecondsIso() respecte
-// le contrat backend strict YYYY-MM-DDTHH:mm:ssZ (sans millisecondes), et que
-// record() / importToAccount() l'utilisent bien. Un code de sortie non nul est
-// renvoyé dès qu'une vérification échoue.
+// le contrat backend strict YYYY-MM-DDTHH:mm:ssZ (sans millisecondes), que
+// record() l'utilise bien, et que l'accesseur currentUser reflète la session
+// (utilisé par app.js pour étiqueter le classement avec l'identifiant du compte).
+// Un code de sortie non nul est renvoyé dès qu'une vérification échoue.
 
 ObjC.import("Foundation");
 
@@ -96,15 +97,23 @@ if (!source || source.length === 0) {
       });
     check("la sortie respecte toujours ^YYYY-MM-DDTHH:mm:ssZ$ (sans fraction)", case5ok, "");
 
+    // --- Accesseur currentUser (utilisé par app.js pour étiqueter le classement
+    //     avec l'identifiant du compte au lieu du suffixe « (invité) ») ---
+    check("currentUser() exposé par le module", typeof Module.currentUser === "object" || Module.currentUser === null, "");
+    check("currentUser === null sans session (mode invité)", Module.currentUser === null, "");
+    Module.setSession({ token: "tok-test", user: { id: 7, login: "alice", role: "user" } });
+    check(
+      "currentUser.login reflète la session (alice)",
+      Module.currentUser && Module.currentUser.login === "alice",
+      Module.currentUser ? Module.currentUser.login : ""
+    );
+    Module.setSession(null);
+    check("currentUser === null après reset de session", Module.currentUser === null, "");
+
     // --- Les pivots du correctif utilisent bien la fonction commune ---
     check(
       "record() utilise toUtcSecondsIso pour played_at",
       /playedAt\s*=\s*toUtcSecondsIso/.test(source),
-      ""
-    );
-    check(
-      "importToAccount() utilise toUtcSecondsIso pour played_at",
-      /played_at\s*:\s*toUtcSecondsIso/.test(source),
       ""
     );
   }

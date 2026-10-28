@@ -18,7 +18,6 @@ declare(strict_types=1);
  *  - profile/password      (POST) : modification du mot de passe.
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
- *  - result/import         (POST) : import des anciennes parties invitées (connecté).
  *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
  *
  *  Routes d'administration (réservées au rôle `admin`, vérifié côté serveur) :
@@ -178,19 +177,12 @@ try {
             Response::success($stats->stats((int)$user['id'], $mode));
             break;
 
-        case 'result/import':
-            // Import volontaire, idempotent et transactionnel, des parties invitées.
-            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
-            $user = $auth->currentUser();
-            if ($user === null) {
-                Response::error('Authentification requise.', 401);
-            }
-            $items = isset($parsed['items']) && is_array($parsed['items'])
-                ? $parsed['items']
-                : [];
-            $outcome = $results->importGuest((int)$user['id'], $items);
-            Response::success($outcome, 201);
-            break;
+        // NOTE v12.2 : la route `result/import` (import des anciennes parties
+        // invitées) a été volontairement SUPPRIMÉE. Toute requête vers cette
+        // action tombe désormais sur le cas `default` (404 « Action inconnue »),
+        // de sorte qu'un ancien client ne peut plus importer de données vers un
+        // compte. Les classements invités et la sauvegarde `result/save` restent
+        // actifs ; l'import n'est plus utilisable, même par un appel API direct.
 
         // ---------------------------------------------------------------------
         // Routes d'administration (v12.1) : TOUTES vérifient le rôle côté serveur

@@ -304,6 +304,8 @@
           <p id="nameWarning" class="inline-message" aria-live="polite"></p>
         </div>
 
+        <div id="saveStatus" class="inline-message save-status" aria-live="polite" hidden></div>
+
         <div class="result-actions">
           <button class="btn btn-primary" data-action="restart">Nouvelle partie</button>
           <button class="btn btn-secondary" data-action="save-home">Enregistrer et revenir à l’accueil</button>
@@ -397,15 +399,6 @@
           <h2 id="accountTitle">Mon compte</h2>
         </div>
         <div id="accountSummary" class="account-summary"></div>
-
-        <div id="guestImportBlock" class="import-block" hidden>
-          <h3>Mes anciennes parties</h3>
-          <p id="guestImportInfo" class="muted"></p>
-          <div id="guestImportActions">
-            <button type="button" class="btn btn-primary" id="importGuestBtn">Importer mes anciennes parties</button>
-          </div>
-          <p id="importFeedback" class="form-message" aria-live="polite"></p>
-        </div>
 
         <h3>Changer le mot de passe</h3>
         <form id="passwordForm" class="account-form" novalidate>

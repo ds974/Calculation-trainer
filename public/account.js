@@ -10,11 +10,12 @@
  *  - Récupérer l'état de connexion au chargement / à l'actualisation de la page.
  *  - Récupérer et transmettre les jetons CSRF pour toute opération POST.
  *  - Brancher le module d'historique invité (GuestHistoryV12) via setSession().
- *  - Afficher connexion, inscription, profil et import volontaire des parties invitées.
+ *  - Afficher connexion, inscription, profil et statistiques personnelles.
  *  - Désactiver l'accès au compte pendant une partie en cours.
  *
- * L'API PHP existante (auth/*, profile/*, result/import) est réutilisée telle quelle ;
- * ce module n'ajoute aucune logique d'authentification parallèle.
+ * L'API PHP existante (auth/*, profile/*, result/save, stats) est réutilisée
+ * telle quelle ; ce module n'ajoute aucune logique d'authentification parallèle.
+ * L'import des anciennes parties invitées a été retiré (v12.2).
  */
 
 const AccountUI = (() => {
@@ -259,41 +260,6 @@ const AccountUI = (() => {
     since.innerHTML = "<strong>Inscrit le :</strong> " + formatDate(user.created_at || "");
     wrap.append(login, role, since);
     summary.appendChild(wrap);
-
-    renderImportBlock();
-  }
-
-  function renderImportBlock() {
-    const block = document.getElementById("guestImportBlock");
-    if (!block) return;
-    clearFeedback("importFeedback");
-
-    if (!user) {
-      block.hidden = true;
-      return;
-    }
-
-    let pending = 0;
-    if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.pendingCount) {
-      pending = window.MissionGuestHistory.pendingCount();
-    }
-
-    const info = document.getElementById("guestImportInfo");
-    const btn = document.getElementById("importGuestBtn");
-    if (pending <= 0) {
-      block.hidden = true;
-      showToast("Aucune ancienne partie invitée à importer.");
-      return;
-    }
-
-    block.hidden = false;
-    info.textContent =
-      "Il reste " + pending + " partie" + (pending > 1 ? "s" : "") +
-      " invitée" + (pending > 1 ? "s" : "") +
-      " enregistrée" + (pending > 1 ? "s" : "") +
-      " dans ce navigateur et non encore importée" + (pending > 1 ? "s" : "") +
-      " pour votre compte.";
-    if (btn) btn.textContent = "Importer mes anciennes parties (" + pending + ")";
   }
 
   // --------------------------------------------------------------------- Auth
@@ -465,65 +431,6 @@ const AccountUI = (() => {
   }
 
 
-  // --------------------------------------------------------------------- Import
-
-  async function handleImport() {
-    clearFeedback("importFeedback");
-    if (!user || typeof window.MissionGuestHistory === "undefined" || !window.MissionGuestHistory.importToAccount) return;
-
-    const pending = window.MissionGuestHistory.pendingCount ? window.MissionGuestHistory.pendingCount() : 0;
-    if (pending <= 0) {
-      setFeedback("importFeedback", "Aucune ancienne partie invitée à importer.", "success");
-      return;
-    }
-
-    // Confirmation explicite avant l'import.
-    const confirmed = window.confirm(
-      "Voulez-vous importer " + pending + " ancienne" + (pending > 1 ? "s" : "") +
-      " partie" + (pending > 1 ? "s" : "") +
-      " invitée" + (pending > 1 ? "s" : "") +
-      " vers votre compte ?\n\nCes parties seront ajoutées à votre historique. " +
-      "Aucune donnée locale ne sera supprimée."
-    );
-    if (!confirmed) return;
-
-    const btn = document.getElementById("importGuestBtn");
-    setBusy(btn, true, "Import en cours…");
-    const result = await window.MissionGuestHistory.importToAccount(() => true);
-    setBusy(btn, false);
-
-    const resp = result.response || {};
-    if (result.error === "not-connected" || (result.error === "server" && resp.status === 401)) {
-      await handleSessionExpired("Votre session a expiré. Reconnectez-vous.");
-      return;
-    }
-    if (result.error === "réseau" || (result.error !== undefined && resp.status === 0)) {
-      setFeedback("importFeedback", "Erreur réseau pendant l’import. Réessayez. Vos données locales sont intactes.", "error");
-      return;
-    }
-    // Vérification correcte : si tout est OK, ne pas afficher d'erreur
-    if (result.error === "server" && resp && !resp.ok) {
-      setFeedback("importFeedback", "L’import a échoué. Vos parties locales sont conservées.", "error");
-      return;
-    }
-    // Si on arrive ici, c'est que tout s'est bien passé
-    if (result.error !== undefined) {
-      // Si erreur non gérée, on affiche quand même un message
-      setFeedback("importFeedback", "L’import a échoué. Vos parties locales sont conservées.", "error");
-      return;
-    }
-
-    const imported = result.imported || 0;
-    const skipped = result.skipped || 0;
-    setFeedback(
-      "importFeedback",
-      imported + " partie" + (imported > 1 ? "s" : "") + " importée" + (imported > 1 ? "s" : "") +
-      (skipped > 0 ? " ; " + skipped + " déjà présente" + (skipped > 1 ? "s" : "") + " (doublon" + (skipped > 1 ? "s" : "") + ")." : "."),
-      "success"
-    );
-    renderImportBlock();
-  }
-
   // --------------------------------------------------------------------- Événements
 
   function bindEvents() {
@@ -541,11 +448,6 @@ const AccountUI = (() => {
 
       if (event.target.closest("[data-account-logout]")) {
         handleLogout();
-        return;
-      }
-
-      if (event.target.closest("#importGuestBtn")) {
-        handleImport();
         return;
       }
     });

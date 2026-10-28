@@ -53,15 +53,13 @@ final class TestRunner
         $this->testUnauthenticatedAccess();
         $this->testEmailMigration();
 
-        // Étape 3 : enregistrement des résultats, historique et import invité.
+        // Étape 3 : enregistrement des résultats et historique (l'import invité a
+        // été retiré en v12.2 — plus de route serveur, plus de méthode importGuest).
         $this->testResultSave();
         $this->testResultValidation();
         $this->testResultPlayedAtContract();
         $this->testResultAuth();
         $this->testResultHistoryIsolation();
-        $this->testGuestImport();
-        $this->testGuestImportDuplicate();
-        $this->testGuestImportMalformed();
 
         // Étape 6 : statistiques personnelles (backend).
         $this->testStatsAggregation();
@@ -1011,43 +1009,24 @@ final class TestRunner
             }
             $this->check($msRejected, 'save avec millisecondes (.123Z) refusé => la normalisation client est requise');
 
-            // 3. Import invité : une entrée avec millisecondes est sautée (rejetée)…
-            $msImport = $results->importGuest($id, [
-                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00.456Z'],
-            ]);
-            $this->check(
-                $msImport['imported'] === 0 && $msImport['skipped'] === 1,
-                'import avec played_at à millisecondes : 0 importée, 1 sautée'
-            );
+            // 3. Enregistrement normal (strict) en mode ADDITION aussi : le contrat
+            // d'horodatage est identique pour les deux modes (additions/multiplications).
+            $ridAdd = $results->save($id, 'addition', 6, '2026-10-28T09:00:00Z');
+            $this->check($ridAdd > 0, 'save addition avec format strict ...Z accepte');
 
-            // 4. …et la version normalisée (strict) est bien importée puis visible.
-            $normImport = $results->importGuest($id, [
-                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
-            ]);
-            $this->check(
-                $normImport['imported'] === 1,
-                'import de la version normalisée (strict) : 1 importée'
-            );
+            // 4. Historique : les 2 parties strictes (multiplication + addition) sont visibles.
             $history = $results->history($id);
             $this->check(
                 count($history) === 2,
-                'les 2 parties (1 save strict + 1 import strict) sont visibles dans l\'historique'
+                'les 2 parties strictes (1 multiplication + 1 addition) sont visibles dans l\'historique'
             );
 
-            // 5. Les statistiques reflètent bien ces parties.
-            $s = $stats->stats($id, 'multiplication');
+            // 5. Les statistiques reflètent ces parties, mode par mode.
+            $sMult = $stats->stats($id, 'multiplication');
+            $sAdd = $stats->stats($id, 'addition');
             $this->check(
-                ($s['totals']['games'] ?? -1) === 2,
-                'les statistiques intègrent les 2 parties (total = 2)'
-            );
-
-            // 6. Idempotence : un nouvel import ne duplique rien.
-            $re = $results->importGuest($id, [
-                ['guest_id' => 'v12-ms1', 'mode' => 'multiplication', 'score' => 6, 'played_at' => '2026-10-20T09:00:00Z'],
-            ]);
-            $this->check(
-                $re['imported'] === 0 && $re['skipped'] === 1 && count($results->history($id)) === 2,
-                'réimport : 0 importée, doublon refusé, historique inchangé (pas de duplication)'
+                ($sMult['totals']['games'] ?? -1) === 1 && ($sAdd['totals']['games'] ?? -1) === 1,
+                'les statistiques integrent 1 partie par mode (additions et multiplications)'
             );
         } catch (Throwable $e) {
             $this->check(false, "Contrat played_at : {$e->getMessage()}");
@@ -1122,92 +1101,6 @@ final class TestRunner
             $this->check(count($results->history($b)) === 0, 'B ne consulte pas l\'historique de A');
         } catch (Throwable $e) {
             $this->check(false, "Historique/isolation : {$e->getMessage()}");
-        }
-    }
-
-    // --- Étape 3 : import invité valide ---
-
-    private function testGuestImport(): void
-    {
-        echo "[Import invité]\n";
-        try {
-            $db = new Database($this->tmpRoot);
-            $pdo = $db->pdo();
-            $repo = new UserRepository($pdo);
-            $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_imp', 'password' => 'motdepasse10', 'role' => 'user']);
-
-            $items = [
-                ['guest_id' => 'v12-aaa111', 'mode' => 'multiplication', 'score' => 8, 'played_at' => '2026-01-10T08:00:00Z'],
-                ['guest_id' => 'v12-bbb222', 'mode' => 'addition', 'score' => 4, 'played_at' => '2026-01-11T09:30:00Z'],
-                ['guest_id' => 'v12-ccc333', 'mode' => 'multiplication', 'score' => 10, 'played_at' => '2026-01-12T10:00:00Z'],
-            ];
-            $out = $results->importGuest($id, $items);
-            $this->check($out['imported'] === 3 && $out['skipped'] === 0, 'Import invité valide (3 importées, 0 sautées)');
-            $this->check(count($results->history($id)) === 3, 'Import : 3 parties ajoutées à l\'historique');
-        } catch (Throwable $e) {
-            $this->check(false, "Import invité : {$e->getMessage()}");
-        }
-    }
-
-    // --- Étape 3 : idempotence de l'import (doublons) ---
-
-    private function testGuestImportDuplicate(): void
-    {
-        echo "[Import invité — idempotence]\n";
-        try {
-            $db = new Database($this->tmpRoot);
-            $pdo = $db->pdo();
-            $repo = new UserRepository($pdo);
-            $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_dup', 'password' => 'motdepasse10', 'role' => 'user']);
-
-            $items = [
-                ['guest_id' => 'v12-ddd444', 'mode' => 'multiplication', 'score' => 9, 'played_at' => '2026-02-01T08:00:00Z'],
-            ];
-            $first = $results->importGuest($id, $items);
-            $second = $results->importGuest($id, $items); // réessai : même guest_id
-
-            $this->check($first['imported'] === 1, 'Premier envoi : 1 partie importée');
-            $this->check($second['imported'] === 0 && $second['skipped'] === 1, 'Réessai : 0 importée, doublon refusé');
-            $this->check(count($results->history($id)) === 1, 'Aucun doublon dans l\'historique après réessai');
-        } catch (Throwable $e) {
-            $this->check(false, "Import doublons : {$e->getMessage()}");
-        }
-    }
-
-    // --- Étape 3 : rejet des données d'import malformées ---
-
-    private function testGuestImportMalformed(): void
-    {
-        echo "[Import invité — données malformées]\n";
-        try {
-            $db = new Database($this->tmpRoot);
-            $pdo = $db->pdo();
-            $repo = new UserRepository($pdo);
-            $results = new ResultService($pdo, new ResultRepository($pdo));
-            $id = $repo->create(['login' => 'guest_bad', 'password' => 'motdepasse10', 'role' => 'user']);
-
-            // Structure globale invalide (liste associative non indexée).
-            try {
-                $results->importGuest($id, ['x' => 'y']);
-                $this->check(false, 'Structure globale non-listée refusée');
-            } catch (InvalidArgumentException) {
-                $this->check(true, 'Structure globale non-listée refusée');
-            }
-
-            // Lignes individuellement malformées : ignorées, aucune écriture.
-            $bad = [
-                ['guest_id' => 'v12-bad1', 'mode' => 'inconnu', 'score' => 5, 'played_at' => '2026-03-01T08:00:00Z'],
-                ['guest_id' => 'v12-bad2', 'mode' => 'multiplication', 'score' => 99, 'played_at' => '2026-03-01T08:00:00Z'],
-                ['guest_id' => 'v12-bad3', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-03-0108:00'],
-                ['guest_id' => 'v12-bad4<b>', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-03-01T08:00:00Z'],
-            ];
-            $out = $results->importGuest($id, $bad);
-            $this->check($out['imported'] === 0 && $out['skipped'] === 4, 'Données malformées toutes sautées (0 importée)');
-            $this->check(count($results->history($id)) === 0, 'Aucune donnée malformée persistée');
-        } catch (Throwable $e) {
-            $this->check(false, "Import malformé : {$e->getMessage()}");
         }
     }
 
@@ -1341,11 +1234,12 @@ final class TestRunner
         }
     }
 
-    // --- Étape 6 : les parties importées (invité) comptent dans les stats ---
+    // --- Étape 6 : les statistiques personnelles reflètent les parties
+    // enregistrées (connecté), pour les additions ET les multiplications ---
 
     private function testStatsIncludesImported(): void
     {
-        echo "[Statistiques — parties importées]\n";
+        echo "[Statistiques — parties enregistrées (connecté)]\n";
         try {
             $db = new Database($this->tmpRoot);
             $pdo = $db->pdo();
@@ -1353,20 +1247,25 @@ final class TestRunner
             $resultRepository = new ResultRepository($pdo);
             $results = new ResultService($pdo, $resultRepository);
             $stats = new StatsService($resultRepository);
-            $id = $repo->create(['login' => 'stats_imp', 'password' => 'motdepasse10', 'role' => 'user']);
+            $id = $repo->create(['login' => 'stats_conn', 'password' => 'motdepasse10', 'role' => 'user']);
 
-            // Une partie enregistrée + deux importées (mode invité déjà en base).
+            // Une partie en multiplication + une partie en addition, enregistrées
+            // normalement (aucune importation ne subsiste en v12.2).
             $results->save($id, 'multiplication', 7, '2026-10-27T10:00:00Z');
-            $results->importGuest($id, [
-                ['guest_id' => 'v12-s1', 'mode' => 'multiplication', 'score' => 5, 'played_at' => '2026-10-26T10:00:00Z'],
-                ['guest_id' => 'v12-s2', 'mode' => 'multiplication', 'score' => 9, 'played_at' => '2026-10-25T10:00:00Z'],
-            ]);
+            $results->save($id, 'addition', 9, '2026-10-26T10:00:00Z');
 
-            $s = $stats->stats($id, 'multiplication');
-            $this->check($s['totals']['games'] === 3, 'Les parties importées comptent dans le total (3)');
-            $this->check($s['totals']['best_score'] === 9, 'Le meilleur score tient compte des importées');
+            $sMult = $stats->stats($id, 'multiplication');
+            $this->check(
+                ($sMult['totals']['games'] ?? -1) === 1 && ($sMult['totals']['best_score'] ?? -1) === 7,
+                'Stats multiplication : 1 partie, meilleur score 7'
+            );
+            $sAdd = $stats->stats($id, 'addition');
+            $this->check(
+                ($sAdd['totals']['games'] ?? -1) === 1 && ($sAdd['totals']['best_score'] ?? -1) === 9,
+                'Stats addition : 1 partie, meilleur score 9 (fonctionnement identique aux multiplications)'
+            );
         } catch (Throwable $e) {
-            $this->check(false, "Statistiques importées : {$e->getMessage()}");
+            $this->check(false, "Statistiques enregistrées : {$e->getMessage()}");
         }
     }
 

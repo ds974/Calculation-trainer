@@ -1,31 +1,29 @@
 "use strict";
 
 /**
- * guest-history.js — Historique et import invité (Mission Calcul Mental v12).
+ * guest-history.js — Historique des parties invitées (Mission Calcul Mental v12).
  *
  * Fournit UN espace localStorage DÉDIÉ à l'historique des parties invitées v12,
  * sans toucher aux clés de la v10/v11 (multiplicationTrainer.config.v11,
  * multiplicationTrainer.scores.v11, .v10, tables, timeLimit, scores…).
  *
- * Comportement :
+ * Comportement (v12.2) :
  *  - En mode invité (non connecté), chaque partie terminée est enregistrée
  *    localement dans `missionCalculMental.history.v12`. Jamais mélangée aux
  *    statistiques des comptes connectés.
  *  - En mode connecté (session définie via setSession), la partie est envoyée
- *    au serveur (result/save) et n'est PAS stockée localement.
- *  - L'import (`importToAccount`) envoie volontairement l'historique invité au
- *    compte connecté, de façon idempotente : après réussite, une trace locale
- *    des `guest_id` importés est conservée pour ne pas les renvoyer, et le
- *    serveur refuse également les doublons (colonne unique guest_id par user).
+ *    au serveur (`result/save`) et n'est PAS stockée localement. L'identité du
+ *    joueur est celle de la SESSION SERVEUR authentifiée : le client ne transmet
+ *    aucun user_id, évitant toute attribution frauduleuse par pseudonyme.
  *
- * Ce module est autonome et prêt à être branché par l'interface de connexion
- * (étape suivante) : il faut uniquement appeler setSession() après connexion /
- * déconnexion côté frontend.
+ * L'import des anciennes parties invitées vers un compte a été volontairement
+ * SUPPRIMÉ (v12.2) : le module ne propose plus aucune opération d'import, et la
+ * route serveur correspondante a été retirée. Les parties invitées restent
+ * toutefois conservées localement sans être détruites.
  */
 
 const GuestHistoryV12 = (() => {
   const STORAGE_KEY = "missionCalculMental.history.v12";
-  const IMPORTED_KEY = "missionCalculMental.history.v12.imported";
   const API_BASE = "api/index.php";
 
   // État de session. null = invité. Renseigné par le module d'authentification.
@@ -58,49 +56,7 @@ const GuestHistoryV12 = (() => {
     }
   }
 
-  /**
-   * Clé de stockage de la trace d'imports, SCOPÉE au compte connecté.
-   * Un même navigateur pouvant être utilisé par plusieurs comptes, chaque compte
-   * possède sa propre liste d'imports déjà effectués afin de ne pas les confondre.
-   * Sans session, on retombe sur une clé générique (l'import n'a de toute façon
-   * de sens qu'avec une session).
-   */
-  function importedKeyFor() {
-    const uid = session && session.user && session.user.id != null
-      ? String(session.user.id)
-      : "";
-    return uid !== "" ? `${IMPORTED_KEY}.${uid}` : IMPORTED_KEY;
-  }
-
-  /** Trace locale des guest_id déjà importés (évite de les réimporter). */
-  function loadImported() {
-    try {
-      const raw = localStorage.getItem(importedKeyFor());
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? new Set(parsed) : new Set();
-    } catch (_e) {
-      return new Set();
-    }
-  }
-
-  function saveImported(ids) {
-    try {
-      localStorage.setItem(importedKeyFor(), JSON.stringify([...ids]));
-    } catch (_e) {
-      /* ignore */
-    }
-  }
-
-  /**
-   * Parties invitées locales encore à importer pour le compte connecté,
-   * c'est-à-dire celles dont le guest_id n'a pas encore été importé pour CE compte.
-   */
-  function pendingEntries() {
-    const importedSet = loadImported();
-    return loadAll().filter((e) => e && e.guest_id && !importedSet.has(e.guest_id));
-  }
-
-  /** Génère un guest_id stable pour la partie (idempotence de l'import). */
+  /** Génère un identifiant stable pour une partie invitée conservée localement. */
   function makeGuestId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return "v12-" + window.crypto.randomUUID();
@@ -184,68 +140,17 @@ const GuestHistoryV12 = (() => {
     return { server: false, entry: entry };
   }
 
-  /**
-   * Importe volontairement l'historique invite vers le compte connecte.
-   * @param {function(number):boolean|Promise<boolean>} [confirmFn] confirmation explicite.
-   * @return {Promise<object>} {cancelled}|{error}|{imported,skipped}.
-   */
-  async function importToAccount(confirmFn) {
-    if (!session) {
-      return { error: "not-connected" };
-    }
-
-    const pending = pendingEntries();
-
-    if (pending.length === 0) {
-      return { imported: 0, skipped: 0 };
-    }
-
-    if (typeof confirmFn === "function") {
-      const ok = await confirmFn(pending.length);
-      if (!ok) {
-        return { cancelled: true };
-      }
-    }
-
-    const res = await api("result/import", {
-      items: pending.map((e) => ({
-        guest_id: e.guest_id,
-        mode: serverMode(e.mode),
-        score: e.score,
-        played_at: toUtcSecondsIso(e.played_at),
-      })),
-    });
-
-    if (!res.ok) {
-      return { error: "server", response: res };
-    }
-
-    // Le serveur a traité la demande de façon idempotente : que des parties aient
-    // été importées ou simplement reconnues comme déjà présentes, on enregistre
-    // dorénavant ces guest_id comme traités pour CE compte afin de ne pas les renvoyer.
-    const sentIds = pending.map((e) => e.guest_id);
-    const next = loadImported();
-    sentIds.forEach((id) => next.add(id));
-    saveImported(next);
-
-    return { imported: res.data.imported, skipped: res.data.skipped };
-  }
-
   return {
     setSession,
     toUtcSecondsIso,
     record,
-    importToAccount,
     loadAll,
-    /**
-     * Nombre de parties invitées locales encore à importer pour le compte connecté.
-     * @return {number}
-     */
-    pendingCount() {
-      return pendingEntries().length;
-    },
     get hasSession() {
       return session !== null;
+    },
+    /** Utilisateur courant de la session (null en mode invité). */
+    get currentUser() {
+      return session ? session.user : null;
     },
   };
 })();

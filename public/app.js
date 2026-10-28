@@ -51,6 +51,7 @@ const state = {
   questionLocked: false,
   finalScore: null,
   savedCurrentResult: false,
+  finalSavePromise: null,
   launchInProgress: false
 };
 
@@ -352,11 +353,22 @@ function startMission() {
   state.results = [];
   state.finalScore = null;
   state.savedCurrentResult = false;
+  state.finalSavePromise = null;
   state.launchInProgress = false;
 
   document.getElementById("playerName").value = "";
   document.getElementById("nameWarning").textContent = "";
   document.getElementById("missionReward").textContent = "";
+  // Le bloc « Prénom » est de nouveau visible au départ d'une mission : sa
+  // visibilité sera ajustée à la fin selon que l'on est connecté ou invité.
+  const nameBlock = document.querySelector(".name-block");
+  if (nameBlock) nameBlock.hidden = false;
+  const saveStatus = document.getElementById("saveStatus");
+  if (saveStatus) {
+    saveStatus.hidden = true;
+    saveStatus.textContent = "";
+    saveStatus.className = "inline-message save-status";
+  }
   resetRocket();
   showScreen("gameScreen");
   presentQuestion();
@@ -620,18 +632,30 @@ function finalizeMission() {
   renderDebrief();
   renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
   showScreen("resultScreen");
-  setTimeout(() => document.getElementById("playerName").focus(), 0);
 
-  // Étape 3 — enregistrement de la partie terminée.
-  // En mode invité (non connecté) : stockage local dédié v12 (guest-history.js),
-  // sans toucher aux clés v10/v11 ni aux classements Top 20 locaux.
-  // En mode connecté : envoi au serveur (result/save), aucune donnée locale.
-  if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.record) {
-    window.MissionGuestHistory.record({
-      mode: state.config.mode,
-      score: state.score,
-      playedAt: new Date().toISOString()
-    });
+  // v12.2 — fin de mission simplifiée.
+  //  - Utilisateur connecté : plus de saisie de prénom ; enregistrement AUTOMATIQUE
+  //    sur le compte (identité = session serveur, jamais un user_id client) avec
+  //    confirmation discrète et « Réessayer » en cas d'échec (aucun doublon).
+  //  - Invité : le prénom reste demandé pour le classement local (Top 20).
+  const connected = isConnected();
+  const nameBlock = document.querySelector(".name-block");
+  const saveStatus = document.getElementById("saveStatus");
+
+  if (connected) {
+    if (nameBlock) nameBlock.hidden = true;
+    if (saveStatus) saveStatus.hidden = false;
+    // Sauvegarde serveur hors-UI : le résultat est enregistré sur le compte ET,
+    // une fois confirmé, alimente aussi le Tableau des scores local (Top 20)
+    // sous l'identifiant du compte (voir saveConnectedResult / addAccountResultToLeaderboard).
+    state.finalSavePromise = saveConnectedResult();
+  } else {
+    if (nameBlock) nameBlock.hidden = false;
+    if (saveStatus) saveStatus.hidden = true;
+    setTimeout(() => {
+      const input = document.getElementById("playerName");
+      if (input) input.focus();
+    }, 0);
   }
 }
 
@@ -667,15 +691,143 @@ function renderDebrief() {
   });
 }
 
-function saveThen(nextAction) {
-  if (!saveCurrentScoreOnce()) return;
-  nextAction();
+/** Vrai si l'utilisateur est connecté (session serveur active, propagée par
+ *  account.js via GuestHistoryV12.setSession). */
+function isConnected() {
+  return typeof window.MissionGuestHistory !== "undefined" &&
+    window.MissionGuestHistory.hasSession === true;
 }
 
-function saveCurrentScoreOnce() {
+/**
+ * Enregistrement AUTOMATIQUE du score d'un utilisateur connecté sur son compte.
+ * L'identité est celle de la connexion (session serveur) : le client ne transmet
+ * AUCUN user_id, l'API détermine le compte via `result/save`.
+ *
+ * Anti-doublon : la partie n'est marquée sauvegardée qu'une fois le serveur a
+ * CONFIRMÉ la réussite (`state.savedCurrentResult = true`). Tant que ce n'est
+ * pas confirmé, un nouvel essai est possible sans jamais écrire deux fois un
+ * même résultat. Une confirmation n'est affichée qu'après cette réussite réelle.
+ *
+ * @return {Promise<boolean>} true si la sauvegarde est effectivement confirmée.
+ */
+async function saveConnectedResult() {
   if (state.savedCurrentResult) return true;
   if (!state.finalScore) return false;
 
+  const statusEl = document.getElementById("saveStatus");
+  if (statusEl) {
+    statusEl.hidden = false;
+    statusEl.className = "inline-message save-status is-busy";
+    statusEl.textContent = "Enregistrement de votre score…";
+  }
+
+  let res = null;
+  try {
+    if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.record) {
+      res = await window.MissionGuestHistory.record({
+        mode: state.config.mode,
+        score: state.score,
+        playedAt: new Date().toISOString()
+      });
+    }
+  } catch (_e) {
+    res = { server: true, ok: false, error: "réseau" };
+  }
+
+  if (res && res.server && res.ok) {
+    // Confirmation EFFECTIVE : le serveur a enregistré. Aucun doublon possible.
+    state.savedCurrentResult = true;
+    // v12.2 — correction : le résultat confirmé d'un compte doit aussi alimenter le
+    // Tableau des scores général (sous l'identifiant du compte, sans suffixe invité).
+    addAccountResultToLeaderboard();
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.className = "inline-message save-status is-success";
+      statusEl.textContent = "Score enregistré sur votre compte.";
+    }
+    return true;
+  }
+
+  // Échec : avertissement clair + bouton « Réessayer » (sans doublon).
+  if (statusEl) {
+    statusEl.hidden = false;
+    statusEl.className = "inline-message save-status is-error";
+    statusEl.innerHTML = "";
+    statusEl.appendChild(document.createTextNode(
+      "Impossible d\u2019enregistrer le score sur votre compte."
+    ));
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "retry-save-btn";
+    retry.textContent = "Réessayer";
+    retry.addEventListener("click", () => {
+      state.finalSavePromise = saveConnectedResult();
+    });
+    statusEl.appendChild(retry);
+  }
+  return false;
+}
+
+/**
+ * Ajoute (au plus une fois) le résultat CONFIRMÉ d'un compte au classement
+ * général local `STORAGE.scores`, sous l'identifiant du compte (sans le suffixe
+ * "(invité)", grâce au marqueur `account:true`). Ce marqueur permet à
+ * `renderLeaderboard()` de ne PAS suffixer le nom, et à `normalizeScore()` de
+ * conserver la distinction entre entrées de comptes et entrées d'invités.
+ *
+ * Appelée uniquement après la confirmation serveur (`saveConnectedResult`) : le
+ * drapeau `state.savedCurrentResult` étant posé, une éventuelle relance (bouton
+ * « Réessayer » ou navigation) ne provoque aucun double enregistrement.
+ */
+function addAccountResultToLeaderboard() {
+  const connectedAccount =
+    (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.currentUser)
+    ? window.MissionGuestHistory.currentUser
+    : null;
+  const login = connectedAccount && connectedAccount.login
+    ? String(connectedAccount.login).trim()
+    : "";
+  if (!login || !state.finalScore) return;
+
+  const scores = loadScores();
+  scores.push({
+    name: login,
+    account: true,
+    score: state.finalScore.score,
+    time: state.finalScore.time,
+    mode: state.finalScore.mode,
+    tables: [...state.finalScore.tables],
+    range: state.finalScore.range || "",
+    date: new Date().toISOString()
+  });
+  saveScores(scores);
+  // Rafraîchit le classement de l'écran de fin de mission et celui du menu.
+  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
+  renderLeaderboard("leaderboardBody", "leaderboardEmpty", state.config.mode);
+}
+
+async function saveThen(nextAction) {
+  const ok = await saveCurrentScoreOnce();
+  if (!ok) return;
+  nextAction();
+}
+
+async function saveCurrentScoreOnce() {
+  // Déjà enregistré (invité : classement local ; connecté : serveur confirmé).
+  if (state.savedCurrentResult) return true;
+  if (!state.finalScore) return false;
+
+  if (isConnected()) {
+    // La sauvegarde serveur est déclenchée automatiquement à la fin de mission
+    // (saveConnectedResult). On attend son issue sans bloquer la navigation : en
+    // cas d'échec, le message + « Réessayer » restent visibles sur cet écran.
+    if (state.finalSavePromise) {
+      await state.finalSavePromise;
+    }
+    return true;
+  }
+
+  // --- Invité : le prénom est requis pour le classement local Top 20. ---
   const input = document.getElementById("playerName");
   const name = input.value.trim();
   if (!name) {
@@ -687,7 +839,7 @@ function saveCurrentScoreOnce() {
   document.getElementById("nameWarning").textContent = "";
   const scores = loadScores();
   scores.push({
-    name,
+    name: displayGuestName(name),
     score: state.finalScore.score,
     time: state.finalScore.time,
     mode: state.finalScore.mode,
@@ -699,6 +851,22 @@ function saveCurrentScoreOnce() {
   state.savedCurrentResult = true;
   renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
   return true;
+}
+
+// Le classement local (Top 20) mélange désormais :
+//  - les résultats d'invités (prénom suivi de « (invité) ») ;
+//  - les résultats de comptes connectés (identifiant du compte, sans suffixe),
+//    ajoutés sous STORAGE.scores après confirmation serveur (marqueur account).
+// Pour un invité, on affiche le prénom suivi de « (invité) », sans jamais
+// doubler le suffixe si une entrée (nouvelle ou ancienne) le contenait déjà.
+
+/** Restitue le prénom d'un invité affiché dans le classement : « Prénom (invité) ». */
+function displayGuestName(name) {
+  const trimmed = String(name || "").trim();
+  if (typeof trimmed === "string" && /\(\s*invité\s*\)$/i.test(trimmed)) {
+    return trimmed;
+  }
+  return trimmed + " (invité)";
 }
 
 // Fonction UNIQUE utilisée par le classement du menu ET par celui de fin de mission.
@@ -731,7 +899,11 @@ function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
     const row = document.createElement("tr");
 
     const name = document.createElement("td");
-    name.textContent = entry.name;
+    // Entrées de comptes : identifiant tel quel (jamais suffixé). Entrées
+    // d'invités : prénom suivi de « (invité) », sans jamais doubler le suffixe.
+    name.textContent = entry.account
+      ? String(entry.name ?? "")
+      : displayGuestName(entry.name);
 
     const score = document.createElement("td");
     score.textContent = `${entry.score}/10`;
@@ -786,7 +958,12 @@ function normalizeScore(entry) {
   }
 
   if (!name || !Number.isFinite(score) || !Number.isFinite(time)) return null;
-  return { name, score, time, mode, tables, range, date: entry.date || "" };
+  return {
+    name, score, time, mode, tables, range,
+    date: entry.date || "",
+    // Marqueur « compte connecté » : une entrée d'invité n'a pas ce drapeau.
+    account: entry.account === true
+  };
 }
 
 function loadScores() {

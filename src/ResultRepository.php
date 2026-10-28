@@ -50,20 +50,6 @@ final class ResultRepository
     }
 
     /**
-     * Indique si un résultat avec le guest_id donné existe déjà pour cet utilisateur.
-     *
-     * @return bool true si la combinaison (user_id, guest_id) est déjà présente.
-     */
-    public function guestIdExists(int $userId, string $guestId): bool
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT 1 FROM results WHERE user_id = :user_id AND guest_id = :guest_id LIMIT 1'
-        );
-        $stmt->execute(['user_id' => $userId, 'guest_id' => $guestId]);
-        return $stmt->fetch() !== false;
-    }
-
-    /**
      * Liste l'historique d'un utilisateur, du plus récent au plus ancien.
      *
      * @return array<int,array<string,mixed>> lignes avec champs publics uniquement.

@@ -543,6 +543,32 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
   flex-wrap: wrap;
   margin-top: 12px;
 }
+/* Statut de la sauvegarde du score (utilisateurs connectés) : confirmation
+   discrète et avertissement / bouton « Réessayer » en cas d'échec. */
+.save-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 1.2em;
+  margin: 10px auto 0;
+  font-size: .9rem;
+  text-align: center;
+}
+.save-status.is-success { color: var(--success); }
+.save-status.is-error { color: var(--danger); }
+.save-status.is-busy { color: var(--muted); }
+.save-status .retry-save-btn {
+  font-weight: 650;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.save-status .retry-save-btn:hover { opacity: .8; }
 .empty-state {
   margin: 16px auto;
   padding: 16px;
