@@ -75,7 +75,8 @@ const state = {
   finalScore: null,
   savedCurrentResult: false,
   finalSavePromise: null,
-  launchInProgress: false
+  launchInProgress: false,
+  missionId: null
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -442,6 +443,14 @@ function startMission() {
   state.savedCurrentResult = false;
   state.finalSavePromise = null;
   state.launchInProgress = false;
+  // v12.4 : identifiant stable et unique de LA mission. Conservé lors des
+  // tentatives de sauvegarde répétées ; le serveur s'en sert pour garantir
+  // l'idempotence (une seule écriture par mission_id).
+  if (window.MissionGuestHistory && typeof window.MissionGuestHistory.makeMissionId === "function") {
+    state.missionId = window.MissionGuestHistory.makeMissionId();
+  } else {
+    state.missionId = null;
+  }
 
   document.getElementById("playerName").value = "";
   document.getElementById("nameWarning").textContent = "";
@@ -853,11 +862,24 @@ async function saveConnectedResult() {
   let res = null;
   try {
     if (typeof window.MissionGuestHistory !== "undefined" && window.MissionGuestHistory.record) {
+      const details = (state.results || []).map((item) => ({
+        mode: item.mode === "add" ? "addition" : "multiplication",
+        // Classification INDIVIDUELLE : classic ou hole selon la présence d'un trou.
+        question_type: item.hole ? "hole" : "classic",
+        a: item.a,
+        b: item.b,
+        hole: item.hole || null,
+        // Le serveur RECALCULE la justesse ; on ne transmet pas de flag `correct`.
+        // Une expiration (timedOut) est envoyée sans réponse => erreur côté serveur.
+        user_answer: item.timedOut ? null : item.userAnswer,
+      }));
       res = await window.MissionGuestHistory.record({
         mode: state.config.mode,
         questionType: state.finalScore.questionType || "classic",
         score: state.score,
-        playedAt: new Date().toISOString()
+        playedAt: new Date().toISOString(),
+        missionId: state.missionId || undefined,
+        details,
       });
     }
   } catch (_e) {

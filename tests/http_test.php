@@ -414,6 +414,115 @@ foreach ($histQList as $r) {
 expect('historique restitue question_type « hole »', $code === 200 && is_array($holeRow), "HTTP {$code}");
 expect('historique par défaut question_type « classic »', is_array($classicRow), "HTTP {$code}");
 
+// =====================================================================
+// v12.4 — Mémoire des difficultés personnelles via l'API enrichie.
+// Un compte isolé (dave) pour ne pas perturber les comptes existants.
+//  - result/save avec `mission_id` + `details` valides => 201 (id réel) ;
+//  - rejouer le MÊME mission_id => 200 duplicate:true, result.id null,
+//    aucune seconde écriture (idempotence) ;
+//  - stats expose le bilan `difficulty` (par table) indépendamment du mode ;
+//  - une mission avec un détail invalide => 400 et AUCUNE écriture partielle
+//    (ni résultat, ni entrée de difficulté) — atomicité.
+echo "\n=== Test HTTP — mémoire des difficultés personnelles (v12.4) ===\n";
+
+$jarDave = sys_get_temp_dir() . "/calc_trainer_jar_dave_{$port}.txt";
+register_shutdown_function(static function () use ($jarDave): void {
+    @unlink($jarDave);
+});
+
+[$code, $csrfDave] = get_call("{$base}?action=auth/csrf", $jarDave);
+$csrfDaveJ = json_decode($csrfDave, true);
+$tokenDave = is_array($csrfDaveJ) ? (string)($csrfDaveJ['data']['token'] ?? '') : '';
+expect('csrf dave (v12.4)', $tokenDave !== '', '');
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'dave', 'password' => 'secretpass123', 'csrf_token' => $tokenDave], $jarDave);
+expect('register dave (v12.4) => 201', $code === 201, "HTTP {$code}");
+[$code, $logDave] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'dave', 'password' => 'secretpass123', 'csrf_token' => $tokenDave], $jarDave);
+expect('login dave (v12.4) => 200', $code === 200, "HTTP {$code}");
+[$code, $csrfDave2] = get_call("{$base}?action=auth/csrf", $jarDave);
+$csrfDave2J = json_decode($csrfDave2, true);
+$tokenDave2 = is_array($csrfDave2J) ? (string)($csrfDave2J['data']['token'] ?? '') : '';
+expect('jeton dave après connexion', $tokenDave2 !== '', '');
+
+$daveDetails = [];
+for ($i = 0; $i < 10; $i++) {
+    $daveDetails[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 2, 'b' => 3, 'hole' => null, 'user_answer' => 6];
+}
+
+// 1. Première sauvegarde de la mission avec détails => 201, id réel.
+[$code, $saveDave] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 10,
+    'mission_id' => 'D-M-001', 'details' => $daveDetails, 'csrf_token' => $tokenDave2,
+], $jarDave);
+$saveDaveJ = json_decode($saveDave, true);
+$firstId = is_array($saveDaveJ) ? (int)($saveDaveJ['data']['result']['id'] ?? 0) : 0;
+expect('result/save avancé (mission_id+details) => 201 avec id', $code === 201 && $firstId > 0, "HTTP {$code} (id={$firstId})");
+
+// 2. Rejeu du MÊME mission_id => 200, duplicate:true, id null (idempotence).
+[$code, $saveDave2] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 10,
+    'mission_id' => 'D-M-001', 'details' => $daveDetails, 'csrf_token' => $tokenDave2,
+], $jarDave);
+$saveDave2J = json_decode($saveDave2, true);
+expect('rejeu du même mission_id => 200 duplicate, sans écriture',
+    $code === 200 && ($saveDave2J['data']['duplicate'] ?? false) === true
+        && ($saveDave2J['data']['result']['id'] ?? null) === null,
+    "HTTP {$code}");
+
+// 3. Historique : une seule partie malgré le rejeu (idempotence respectée).
+[$code, $histDave] = get_call("{$base}?action=result/history", $jarDave);
+$histDaveJ = json_decode($histDave, true);
+$histDaveCount = is_array($histDaveJ) && is_array($histDaveJ['data']['history'] ?? null) ? count($histDaveJ['data']['history']) : -1;
+expect('historique dave = 1 partie (mission non dupliquée)', $code === 200 && $histDaveCount === 1, "HTTP {$code} (nb={$histDaveCount})");
+
+// 4. Bilan « Mes points à travailler » exposé par stats (indépendant du mode).
+[$code, $statDave] = get_call("{$base}?action=stats&mode=addition", $jarDave);
+$statDaveJ = json_decode($statDave, true);
+$diff = is_array($statDaveJ) ? ($statDaveJ['data']['difficulty'] ?? null) : null;
+$mcDave = is_array($diff) ? ($diff['multiplication']['classic'] ?? null) : null;
+$tableFound = false;
+$statusMastered = false;
+if (is_array($mcDave)) {
+    foreach ($mcDave as $t) {
+        if (in_array((int)$t['table'], [2, 3], true)) {
+            $tableFound = true;
+            if (($t['status'] ?? '') === 'mastered' && abs((float)$t['attempts'] - 5.0) < 0.01) {
+                $statusMastered = true;
+            }
+        }
+    }
+}
+expect('stats expose le bilan difficulty (multiplication.classic)',
+    $code === 200 && is_array($mcDave) && $tableFound, "HTTP {$code}");
+expect('bilan : table 2/3 maîtrisée (assez pratiquée, diff 0) avec poids 0,5',
+    $statusMastered, 'mastered / attempts 5.0');
+
+// 5. Atomicité : mission avec un détail invalide (hole sur classic) => 400,
+//    et AUCUNE écriture (ni résultat, ni ligne de difficulté pour 4x5).
+$badDave = [];
+for ($i = 0; $i < 9; $i++) {
+    $badDave[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 4, 'b' => 5, 'hole' => null, 'user_answer' => 20];
+}
+$badDave[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 4, 'b' => 5, 'hole' => 'a', 'user_answer' => 4];
+[$code, $saveBad] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 9,
+    'mission_id' => 'D-M-002', 'details' => $badDave, 'csrf_token' => $tokenDave2,
+], $jarDave);
+expect('mission avec détail invalide => 400', $code === 400, "HTTP {$code}");
+[$code, $histDave2] = get_call("{$base}?action=result/history", $jarDave);
+$histDave2J = json_decode($histDave2, true);
+$histDave2Count = is_array($histDave2J) && is_array($histDave2J['data']['history'] ?? null) ? count($histDave2J['data']['history']) : -1;
+expect('aucun résultat écrit pour la mission invalide (atomicité)',
+    $code === 200 && $histDave2Count === 1, "HTTP {$code} (nb={$histDave2Count})");
+[$code, $statDave2] = get_call("{$base}?action=stats&mode=multiplication", $jarDave);
+$statDave2J = json_decode($statDave2, true);
+$mcDave2 = is_array($statDave2J) ? ($statDave2J['data']['difficulty']['multiplication']['classic'] ?? []) : [];
+$badTableSeen = false;
+foreach ($mcDave2 as $t) {
+    if (in_array((int)$t['table'], [4, 5], true)) { $badTableSeen = true; }
+}
+expect('aucune difficulté écrite pour la mission invalide (atomicité)',
+    !$badTableSeen, '');
+
 echo "\n=== Test HTTP — administration (v12.1) ===\n";
 
 // 1. Amorçage direct d'un administrateur dans la base jetable. register crée

@@ -261,6 +261,127 @@ const StatsUI = (() => {
 
   // ------------------------------------------------------------ Rendu principal
 
+  // ------------------------------------------- Bilan « Mes points à travailler »
+
+  /** Libellés pédagogiques des statuts de table (v12.4). */
+  function difficultyLabels() {
+    return {
+      to_work: "À travailler",
+      in_progress: "En progrès",
+      mastered: "Surmontée",
+      insufficient: "À pratiquer",
+    };
+  }
+
+  /** Affiche une difficulté (0 à 5) de façon lisible pour un enfant. */
+  function formatDiff(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    if (n <= 0.05) return "0";
+    if (n <= 0.6) return "½";
+    return String(Math.round(n));
+  }
+
+  /**
+   * Libellé du nombre de tentatives.
+   *
+   * Les tentatives sont PONDÉRÉES (un calcul commutatif 6×7 et 7×6 compte pour
+   * 0,5 sur chaque table) : elles peuvent donc être fractionnaires et ne
+   * représentent pas un nombre réel de questions. On les présente donc comme
+   * une quantité APPROXIMATIVE, arrondie à l'entier, pour rester honnête et
+   * lisible par un enfant.
+   */
+  function attemptsLabel(attempts) {
+    const n = Number(attempts);
+    if (!Number.isFinite(n) || n <= 0) return "pas encore pratiquée";
+    if (n < 1) return "moins d'une tentative";
+    const rounded = Math.round(n);
+    return "environ " + rounded + " tentative" + (rounded > 1 ? "s" : "");
+  }
+
+  /**
+   * Ordre de priorité pédagogique des statuts de table (v12.4).
+   * Plus le nombre est petit, plus la table est prioritaire à travailler.
+   * Valeurs alignées sur le backend (src/OperationDifficultyService.php).
+   */
+  const DIFF_STATUS_ORDER = {
+    to_work: 0,
+    in_progress: 1,
+    insufficient: 2,
+    mastered: 3,
+  };
+
+  /**
+   * Trie une COPIE d'une liste de tables, sans modifier la liste d'origine :
+   *   1. coefficient de difficulté décroissant (critère principal, quelle que
+   *      soit la catégorie de statut) ;
+   *   2. à difficulté égale : statut (À travailler → En progrès → À pratiquer →
+   *      Surmontée) ;
+   *   3. à statut égal : numéro de table croissant.
+   */
+  function sortedDifficultyList(list) {
+    return (list || []).slice().sort((x, y) => {
+      const dx = Number(x.difficulty) || 0;
+      const dy = Number(y.difficulty) || 0;
+      if (dx !== dy) return dy - dx;
+      const ox = DIFF_STATUS_ORDER[x.status] ?? 9;
+      const oy = DIFF_STATUS_ORDER[y.status] ?? 9;
+      if (ox !== oy) return ox - oy;
+      return (Number(x.table) || 0) - (Number(y.table) || 0);
+    });
+  }
+
+  /** Construit un bloc de tables pour une sous-rubrique (classique / à trou). */
+  function buildDifficultyTableBlock(title, list) {
+    const block = el("div", "diff-block");
+    const head = document.createElement("h4");
+    head.textContent = title;
+    block.appendChild(head);
+
+    if (!list || list.length === 0) {
+      block.appendChild(el("p", "diff-empty",
+        "Aucune information pour le moment. Jouez des parties de ce type pour suivre vos progrès."));
+      return block;
+    }
+
+    const ul = document.createElement("ul");
+    ul.className = "diff-tables";
+    sortedDifficultyList(list).forEach((t) => {
+      const li = document.createElement("li");
+      li.className = "diff-table status-" + (t.status || "");
+      li.setAttribute("role", "listitem");
+      li.appendChild(el("span", "diff-table-name", "Table de " + t.table));
+      li.appendChild(el("span", "diff-table-status", difficultyLabels()[t.status] || t.status));
+      li.appendChild(el("span", "diff-table-diff", "difficulté " + formatDiff(t.difficulty)));
+      li.appendChild(el("span", "diff-table-attempts", attemptsLabel(t.attempts)));
+      ul.appendChild(li);
+    });
+    block.appendChild(ul);
+    return block;
+  }
+
+  /**
+   * Rubrique « Mes points à travailler » (v12.4).
+   * Organisée par table, filtrée par le mode actif (Additions/Multiplications),
+   * avec les sous-rubriques « Calculs classiques » et « Calculs à trou ».
+   */
+  function buildDifficultySection(d) {
+    const container = el("section", "stats-difficulty");
+    container.appendChild(el("h3", null, "Mes points à travailler"));
+    container.appendChild(el("p", "diff-intro",
+      "Les tables à travailler sont indiquées par une difficulté de 0 (facile) à 5 (difficile). " +
+      "Les calculs commutatifs et les deux positions du trou comptent ensemble."));
+
+    const diff = (d && d.difficulty) || {};
+    const modeKey = activeMode === "addition" ? "addition" : "multiplication";
+    const rubrique = diff[modeKey] || { classic: [], hole: [] };
+
+    container.appendChild(buildDifficultyTableBlock("Calculs classiques", rubrique.classic));
+    container.appendChild(buildDifficultyTableBlock("Calculs à trou", rubrique.hole));
+    return container;
+  }
+
+
   function renderData(d) {
     const content = document.getElementById("statsContent");
     if (!content) return;
@@ -280,6 +401,10 @@ const StatsUI = (() => {
 
     content.appendChild(buildCards(d));
     content.appendChild(buildPeriodNote());
+    // v12.4 : bilan pédagogique « Mes points à travailler » (mémoire des
+    // difficultés par table), indépendant du sélecteur de mode mais filtré par
+    // celui-ci (classique / à trou de chaque mode).
+    content.appendChild(buildDifficultySection(d));
 
     // Aucune partie jouée : état vide explicite (pas de graphique vide).
     if (totalGames === 0) {

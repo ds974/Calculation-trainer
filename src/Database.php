@@ -186,6 +186,55 @@ final class Database
             )");
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_attempts_login ON login_attempts(login)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address)');
+
+        // --- Migration v12.4 (idempotente, non destructive) : mémoire des difficultés.
+        // Table agrégée par opération : mémorise la maîtrise individuelle propre à
+        // chaque utilisateur connecté. La clé UNIQUE distingue l'utilisateur, le mode
+        // (multiplication/addition), le type de question (classic/hole) et les deux
+        // opérandes NORMALISÉS (operand_a <= operand_b). La normalisation regroupe
+        // les opérations commutatives (6×7 et 7×6) ainsi que les deux positions d'un
+        // trou (le trou n'étant pas stocké dans la clé).
+        // Les opérations maîtrisées (difficulty = 0) restent en base ; on n'efface
+        // jamais une ligne de cette table (conservation de l'historique de maîtrise).
+        $pdo->exec("CREATE TABLE IF NOT EXISTS operations_difficulty (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id          INTEGER NOT NULL,
+                mode             TEXT    NOT NULL
+                                   CHECK (mode IN ('multiplication', 'addition')),
+                question_type    TEXT    NOT NULL
+                                   CHECK (question_type IN ('classic', 'hole')),
+                operand_a        INTEGER NOT NULL CHECK (operand_a BETWEEN 1 AND 99),
+                operand_b        INTEGER NOT NULL CHECK (operand_b BETWEEN 1 AND 99),
+                attempts         INTEGER NOT NULL DEFAULT 0,
+                errors           INTEGER NOT NULL DEFAULT 0,
+                success_streak   INTEGER NOT NULL DEFAULT 0,
+                difficulty       INTEGER NOT NULL DEFAULT 0
+                                   CHECK (difficulty BETWEEN 0 AND 5),
+                last_answered_at TEXT,
+                last_error_at    TEXT,
+                last_resolved_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE (user_id, mode, question_type, operand_a, operand_b)
+            )");
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_operations_diff_user
+                    ON operations_difficulty(user_id)');
+
+        // Table journal d'idempotence par mission (v12.4).
+        // Un même mission_id envoyé une seule fois est enregistré ; une sauvegarde
+        // répétée de la MÊME mission (retry, double POST) est détectée grâce à
+        // l'UNIQUE (user_id, mission_id) et ne produit NI double résultat NI double
+        // mise à jour des difficultés.
+        $pdo->exec("CREATE TABLE IF NOT EXISTS mission_difficulty_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                mission_id TEXT    NOT NULL,
+                saved_at   TEXT NOT NULL
+                           DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE (user_id, mission_id)
+            )");
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_mission_log_user
+                    ON mission_difficulty_log(user_id)');
     }
 
     /** Retourne la connexion PDO unique. */

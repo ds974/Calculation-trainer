@@ -61,6 +61,15 @@ final class TestRunner
         $this->testResultAuth();
         $this->testResultHistoryIsolation();
 
+        // Étape v12.4 : mémoire des difficultés personnelles (barème, agrégation,
+        // idempotence, atomicité, validation, bilan par table).
+        $this->testDifficultySchema();
+        $this->testDifficultyBarème();
+        $this->testDifficultyAggregationAndClassification();
+        $this->testDifficultyIdempotenceAtomicity();
+        $this->testDifficultyValidation();
+        $this->testDifficultyTableSummary();
+
         // Étape 6 : statistiques personnelles (backend).
         $this->testStatsAggregation();
         $this->testStatsIsolation();
@@ -1348,6 +1357,352 @@ final class TestRunner
             $this->check(false, "Sécurité session/en-têtes : {$e->getMessage()}");
         }
     }
+    // ---------------------------------------------------------------------------
+    // v12.4 — Mémoire des difficultés personnelles.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Fabrique un environnement complet de test v12.4 : base temporaire dédiée,
+     * un utilisateur, et les services (ResultService injecté avec la mémoire des
+     * difficultés). Chaque test dispose de sa propre base => déterministe.
+     */
+    private function difficultyHarness(): array
+    {
+        $db = new Database($this->tmpRoot);
+        $pdo = $db->pdo();
+        $users = new UserRepository($pdo);
+        $userId = $users->create([
+            'login' => 'diff_' . substr(uniqid(), -6),
+            'password' => 'motdepasse10',
+            'role' => 'user',
+        ]);
+        $repo = new OperationDifficultyRepository($pdo);
+        $svc = new OperationDifficultyService($pdo, $repo);
+        $results = new ResultService($pdo, new ResultRepository($pdo), $svc);
+        return [
+            'pdo' => $pdo,
+            'userId' => $userId,
+            'repo' => $repo,
+            'svc' => $svc,
+            'results' => $results,
+        ];
+    }
+
+    /** 1. Création du schéma SQLite v12.4 (tables et colonnes attendues). */
+    private function testDifficultySchema(): void
+    {
+        echo "[Mémoire des difficultés — schéma]\n";
+        $h = $this->difficultyHarness();
+        $pdo = $h['pdo'];
+
+        $opCols = $pdo->query('PRAGMA table_info(operations_difficulty)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        $expected = [
+            'id', 'user_id', 'mode', 'question_type', 'operand_a', 'operand_b',
+            'attempts', 'errors', 'success_streak', 'difficulty',
+            'last_answered_at', 'last_error_at', 'last_resolved_at',
+        ];
+        $missing = array_diff($expected, $opCols);
+        $this->check(empty($missing), 'operations_difficulty : toutes les colonnes attendues sont présentes');
+
+        $uniq = (bool)$pdo->query(
+            "SELECT COUNT(*) FROM pragma_index_list('operations_difficulty')
+             WHERE origin = 'u'"
+        )->fetchColumn();
+        $this->check($uniq, 'operations_difficulty : index UNIQUE présent (normalisation opérandes)');
+
+        $logCols = $pdo->query('PRAGMA table_info(mission_difficulty_log)')->fetchAll(PDO::FETCH_COLUMN, 1);
+        $this->check(
+            in_array('mission_id', $logCols, true) && in_array('user_id', $logCols, true),
+            'mission_difficulty_log : colonnes user_id et mission_id présentes'
+        );
+        $logUniq = (bool)$pdo->query(
+            "SELECT COUNT(*) FROM pragma_index_list('mission_difficulty_log')
+             WHERE origin = 'u'"
+        )->fetchColumn();
+        $this->check($logUniq, 'mission_difficulty_log : contrainte UNIQUE (user_id, mission_id) pour l\'idempotence');
+    }
+
+
+    /** 6/7/8/9/10. Barème : erreurs/plafond, réussites, retours à zéro, surmontée, maîtrise conservée. */
+    private function testDifficultyBarème(): void
+    {
+        echo "[Mémoire des difficultés — barème]\n";
+        $h = $this->difficultyHarness();
+        $svc = $h['svc'];
+        $repo = $h['repo'];
+        $uid = $h['userId'];
+
+        $row = fn() => $repo->find($uid, 'multiplication', 'classic', 6, 7);
+
+        $this->check($row() === null, 'aucune ligne de difficulté avant le premier essai');
+
+        for ($i = 0; $i < 5; $i++) {
+            $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, false);
+        }
+        $r = $row();
+        $this->check((int)$r['difficulty'] === 5, '5 erreurs => difficulté plafonnée à 5 (max)');
+        $this->check((int)$r['attempts'] === 5, 'chaque tentative incrémente attempts (5)');
+        $this->check((int)$r['errors'] === 5, 'errors = 5');
+        $this->check((int)$r['success_streak'] === 0, 'une erreur remet la série de réussites à zéro');
+        $this->check($r['last_error_at'] !== null, 'dernière erreur datée');
+        $this->check($r['last_resolved_at'] === null, 'aucune surmontée tant que la difficulté est positive');
+
+        $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, false);
+        $this->check((int)$row()['difficulty'] === 5, 'plafonnement : jamais > 5');
+
+        // Une réponse sans bon résultat (expiration) est aussi une erreur.
+        $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, false);
+        $this->check((int)$row()['difficulty'] === 5, 'réponse absente/expiration traitée comme une erreur');
+
+        // 10 réussites consécutives : de 5 à 0 (toutes les 2 réussites).
+        for ($i = 0; $i < 10; $i++) {
+            $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, true);
+        }
+        $r = $row();
+        $this->check((int)$r['difficulty'] === 0, '10 réussites consécutives ramènent la difficulté à 0');
+        $this->check((int)$r['success_streak'] === 10, 'success_streak = nombre réel de réussites consécutives (10)');
+        $this->check($r['last_resolved_at'] !== null, 'difficulté positive revenue à 0 => surmontée (last_resolved_at)');
+
+        // 9. Identification d'une surmontée sur une difficulté 1 -> 0.
+        $h2 = $this->difficultyHarness();
+        $repo2 = $h2['repo'];
+        $uid2 = $h2['userId'];
+        $svc2 = $h2['svc'];
+        $svc2->applyBarème($uid2, 'addition', 'classic', 3, 4, false); // diff 1
+        $svc2->applyBarème($uid2, 'addition', 'classic', 3, 4, true);  // streak1
+        $svc2->applyBarème($uid2, 'addition', 'classic', 3, 4, true);  // streak2 -> diff0
+        $r2 = $repo2->find($uid2, 'addition', 'classic', 3, 4);
+        $this->check($r2['last_resolved_at'] !== null, 'difficulté 1->0 identifiée comme surmontée');
+
+        // Opération juste du premier coup : diff 0 mais PAS surmontée.
+        $h3 = $this->difficultyHarness();
+        $repo3 = $h3['repo'];
+        $uid3 = $h3['userId'];
+        $h3['svc']->applyBarème($uid3, 'multiplication', 'classic', 9, 9, true);
+        $r3 = $repo3->find($uid3, 'multiplication', 'classic', 9, 9);
+        $this->check((int)$r3['difficulty'] === 0 && $r3['last_resolved_at'] === null,
+            'opération juste du premier coup : diff 0 mais PAS surmontée');
+
+        // 10. Conservation des opérations maîtrisées en base.
+        $all = $repo->allForUser($uid);
+        $this->check(count($all) >= 1, 'opération maîtrisée (difficulty 0) conservée en base');
+    }
+
+    /** 2/3/4/5. Agrégation : normalisation commutative, distinction mode/type, mode mélange. */
+    private function testDifficultyAggregationAndClassification(): void
+    {
+        echo "[Mémoire des difficultés — agrégation]\n";
+        $h = $this->difficultyHarness();
+        $repo = $h['repo'];
+        $svc = $h['svc'];
+        $results = $h['results'];
+        $uid = $h['userId'];
+
+        // Normalisation commutative : 6x7 et 7x6 => même ligne.
+        $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, true);
+        $svc->applyBarème($uid, 'multiplication', 'classic', 7, 6, true);
+        $r = $repo->find($uid, 'multiplication', 'classic', 6, 7);
+        $this->check($r !== null && (int)$r['operand_a'] === 6 && (int)$r['operand_b'] === 7,
+            'opérandes normalises dans l\'ordre a<=b');
+        $this->check((int)$r['attempts'] === 2, '6x7 et 7x6 regroupés (commutativité)');
+        $this->check($repo->find($uid, 'multiplication', 'classic', 7, 6) === null,
+            'aucune ligne doublon pour l\'ordre inverse');
+
+        // Distinction addition / multiplication.
+        $svc->applyBarème($uid, 'addition', 'classic', 6, 7, true);
+        $this->check((int)$repo->find($uid, 'multiplication', 'classic', 6, 7)['attempts'] === 2,
+            'la ligne multiplication est inchangée');
+        $this->check((int)$repo->find($uid, 'addition', 'classic', 6, 7)['attempts'] === 1,
+            'l\'addition est une ligne distincte de la multiplication');
+
+        // Distinction classique / à trou.
+        $svc->applyBarème($uid, 'multiplication', 'hole', 6, 7, true);
+        $this->check((int)$repo->find($uid, 'multiplication', 'hole', 6, 7)['attempts'] === 1,
+            'le type à trou est une ligne distincte');
+        $this->check((int)$repo->find($uid, 'multiplication', 'classic', 6, 7)['attempts'] === 2,
+            'la ligne classique est inchangée par la variante à trou');
+
+        // 5. Mode Mélange : classification INDIVIDUELLE de chaque question et
+        // regroupement des deux positions du trou (a ou b) dans la même clé.
+        $details = [];
+        for ($i = 0; $i < 4; $i++) {
+            $details[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 4, 'b' => 5, 'hole' => null, 'user_answer' => 20];
+        }
+        for ($i = 0; $i < 6; $i++) {
+            $details[] = ['mode' => 'multiplication', 'question_type' => 'hole',
+                'a' => 4, 'b' => 5, 'hole' => ($i % 2 === 0 ? 'a' : 'b'),
+                'user_answer' => ($i % 2 === 0 ? 4 : 5)];
+        }
+        $results->saveWithMission($uid, 'multiplication', 10, 'MIX-A', $details, '2026-01-05T08:00:00Z', 'mixed');
+        $c = $repo->find($uid, 'multiplication', 'classic', 4, 5);
+        $hn = $repo->find($uid, 'multiplication', 'hole', 4, 5);
+        $this->check((int)$c['attempts'] === 4, 'mixed : les 4 questions classiques agrégées sous classic');
+        $this->check((int)$hn['attempts'] === 6, 'mixed : les 6 questions à trou agrégées sous hole');
+        $this->check($hn['operand_a'] === 4 && $hn['operand_b'] === 5,
+            'les deux positions du trou (a/b) regroupées dans une seule clé');
+    }
+
+    /** 11/12. Idempotence d'une mission rejouée + atomicité des écritures. */
+    private function testDifficultyIdempotenceAtomicity(): void
+    {
+        echo "[Mémoire des difficultés — idempotence & atomicité]\n";
+        $h = $this->difficultyHarness();
+        $repo = $h['repo'];
+        $results = $h['results'];
+        $uid = $h['userId'];
+
+        $details = [];
+        for ($i = 0; $i < 10; $i++) {
+            $details[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 2, 'b' => 3, 'hole' => null, 'user_answer' => 6];
+        }
+
+        // 1ère sauvegarde du mission_id.
+        $out1 = $results->saveWithMission($uid, 'multiplication', 10, 'MISSION-A', $details, '2026-02-01T10:00:00Z');
+        $this->check($out1['saved'] === true && $out1['duplicate'] === false, 'première sauvegarde du mission_id réussie');
+
+        // 2nde sauvegarde de la MÊME mission : réponse de succès cohérente, sans écriture.
+        $out2 = $results->saveWithMission($uid, 'multiplication', 10, 'MISSION-A', $details, '2026-02-01T10:00:00Z');
+        $this->check($out2['duplicate'] === true, 'mission_id rejoué => doublon détecté (réponse de succès)');
+        $this->check(count($results->history($uid)) === 1, 'un seul enregistrement de résultat pour le mission_id');
+        $r = $repo->find($uid, 'multiplication', 'classic', 2, 3);
+        $this->check((int)$r['attempts'] === 10,
+            'les 10 réponses s\'accumulent sur une seule ligne ; la mission rejouée (doublon) n\'ajoute rien');
+        $this->check((int)$r['difficulty'] === 0 && (int)$r['success_streak'] === 10,
+            'les 10 réussites conservent une série de 10 (non doublée)');
+
+        // 12. Atomicité : une liste de détails dont le dernier est invalide ne doit
+        // laisser AUCUNE écriture partielle (ni résultat, ni difficulté).
+        $bad = [];
+        for ($i = 0; $i < 9; $i++) {
+            $bad[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 5, 'b' => 6, 'hole' => null, 'user_answer' => 30];
+        }
+        $bad[] = ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 5, 'b' => 6, 'hole' => 'a', 'user_answer' => 5]; // hole sur classic => invalide
+        $rejected = false;
+        try {
+            $results->saveWithMission($uid, 'multiplication', 9, 'MISSION-B', $bad, '2026-02-01T11:00:00Z');
+        } catch (InvalidArgumentException) {
+            $rejected = true;
+        }
+        $this->check($rejected, 'mission avec un détail invalide rejetée');
+        $this->check(count($results->history($uid)) === 1, 'aucun résultat écrit pour la mission invalide (atomicité)');
+        $this->check($repo->find($uid, 'multiplication', 'classic', 5, 6) === null,
+            'aucune ligne de difficulté écrite pour la mission invalide (atomicité)');
+    }
+
+    /** 13. Validation serveur des données individuelles + justesse recalculée. */
+    private function testDifficultyValidation(): void
+    {
+        echo "[Mémoire des difficultés — validation serveur]\n";
+        $h = $this->difficultyHarness();
+        $svc = $h['svc'];
+
+        $validMult = fn() => ['mode' => 'multiplication', 'question_type' => 'classic', 'a' => 3, 'b' => 4, 'hole' => null, 'user_answer' => 12];
+        $cases = [
+            'non-array'       => 'abc',
+            'zero-reponses'   => [],
+            'trop-reponses'   => array_fill(0, 11, $validMult()),
+            'mode-invalide'   => [array_replace($validMult(), ['mode' => 'soustraction'])],
+            'type-invalide'   => [array_replace($validMult(), ['question_type' => 'trou'])],
+            'operande-zero'   => [array_replace($validMult(), ['a' => 0])],
+            'operande-trop'   => [array_replace($validMult(), ['b' => 100])],
+            'hole-sur-classic'=> [array_replace($validMult(), ['hole' => 'a'])],
+            'trou-position'   => [array_replace($validMult(), ['question_type' => 'hole', 'hole' => 'c'])],
+        ];
+        $rejected = 0;
+        foreach ($cases as $label => $case) {
+            try {
+                $svc->validateDetails($case);
+            } catch (InvalidArgumentException) {
+                $rejected++;
+            }
+        }
+        $this->check($rejected === count($cases), 'tous les cas de détails invalides sont rejetés par le serveur');
+
+        // Justesse RECALCULÉE : un `correct` fourni par le client est IGNORÉ.
+        $ev = $svc->validateDetails([
+            array_replace($validMult(), ['correct' => false]),
+        ]);
+        $this->check($ev[0]['correct'] === true, 'correct=false envoyé par le client ignoré : juste réponse recalculée vraie');
+        $ev2 = $svc->validateDetails([
+            array_replace($validMult(), ['correct' => true, 'user_answer' => 99]),
+        ]);
+        $this->check($ev2[0]['correct'] === false, 'correct=true envoyé par le client ignoré : mauvaise réponse recalculée fausse');
+
+        // Expiration / réponse absente => incorrect, traitée comme une erreur.
+        $ev3 = $svc->validateDetails([
+            ['mode' => 'addition', 'question_type' => 'classic', 'a' => 2, 'b' => 2, 'hole' => null, 'user_answer' => null],
+        ]);
+        $this->check($ev3[0]['correct'] === false, 'réponse absente (expiration) recalculée incorrecte');
+
+        // Réponse non numérique (ex. '12abc', interdit par le moteur de jeu) => fausse,
+        // sans provoquer d'exception de structure (détail toujours accepté).
+        $ev4 = $svc->validateDetails([
+            array_replace($validMult(), ['user_answer' => '12abc']),
+        ]);
+        $this->check($ev4[0]['correct'] === false, 'réponse non numérique recalculée incorrecte (détail accepté)');
+    }
+
+    /** 14/15. Bilan par table : sans double comptage, tables peu/jamais pratiquées. */
+    private function testDifficultyTableSummary(): void
+    {
+        echo "[Mémoire des difficultés — bilan par table]\n";
+        $h = $this->difficultyHarness();
+        $svc = $h['svc'];
+        $uid = $h['userId'];
+
+        // classic mult : 3x3 en erreurs (3) -> diff3 ; 9x9 réussi (1) ; 6x7 en erreurs (2) -> diff2.
+        for ($i = 0; $i < 3; $i++) { $svc->applyBarème($uid, 'multiplication', 'classic', 3, 3, false); }
+        $svc->applyBarème($uid, 'multiplication', 'classic', 9, 9, true);
+        for ($i = 0; $i < 2; $i++) { $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, false); }
+        // hole mult : 3x3 en erreurs (2) -> diff2.
+        for ($i = 0; $i < 2; $i++) { $svc->applyBarème($uid, 'multiplication', 'hole', 3, 3, false); }
+        // addition classic : 5x5 réussi (4) -> diff0 (surmontée/non, jamais positive).
+        for ($i = 0; $i < 4; $i++) { $svc->applyBarème($uid, 'addition', 'classic', 5, 5, true); }
+
+        $s = $svc->tableSummary($uid);
+        $this->check(
+            isset($s['multiplication']['classic']) && isset($s['multiplication']['hole'])
+            && isset($s['addition']['classic']) && isset($s['addition']['hole']),
+            'les 4 rubriques (mode x classic/hole) sont présentes'
+        );
+
+        $find = function (array $list, int $t): ?array {
+            foreach ($list as $e) {
+                if ((int)$e['table'] === $t) {
+                    return $e;
+                }
+            }
+            return null;
+        };
+
+        $mc = $s['multiplication']['classic'];
+        $t3 = $find($mc, 3);
+        $this->check($t3 !== null && $t3['status'] === 'to_work' && $t3['difficulty'] === 3.0,
+            'table 3 : assez pratiquée et difficile => « À travailler »');
+        $t9 = $find($mc, 9);
+        $this->check($t9 !== null && $t9['status'] === 'insufficient' && $t9['difficulty'] === 0.0,
+            'table 9 : peu pratiquée (1 tentative) => « à pratiquer » et JAMAIS maîtrisée');
+        $t6 = $find($mc, 6);
+        $t7 = $find($mc, 7);
+        $this->check($t6 !== null && $t6['status'] === 'insufficient' && $t7 !== null,
+            'tables 6 et 7 réparties (poids 0,5 chacun) et peu pratiquées');
+
+        $mh = $s['multiplication']['hole'];
+        $this->check($find($mh, 3)['status'] === 'insufficient', 'table 3 à trou peu pratiquée => à pratiquer');
+
+        $ac = $s['addition']['classic'];
+        $t5 = $find($ac, 5);
+        $this->check($t5 !== null && $t5['status'] === 'mastered', 'table 5 additions : assez pratiquée et diff 0 => maîtrisée');
+
+        // Sans double comptage : la somme des difficultés/essais des tables d'une
+        // rubrique égale la somme sur les opérations de cette rubrique.
+        $sumDiff = 0.0;
+        $sumAtt = 0.0;
+        foreach ($mc as $e) { $sumDiff += $e['difficulty']; $sumAtt += $e['attempts']; }
+        $this->check(abs($sumDiff - 5.0) < 0.01 && abs($sumAtt - 6.0) < 0.01,
+            'pas de double comptage : totaux de la rubrique classique préservés (diff 5, essais 6)');
+    }
+
 }
 $runner = new TestRunner();
 exit($runner->run());

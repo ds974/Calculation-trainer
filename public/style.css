@@ -1169,6 +1169,71 @@ input[type="password"] {
 }
 .stats-note p { margin: 0; }
 
+
+/* Rubrique « Mes points à travailler » (v12.4) */
+.stats-difficulty { margin: 22px 0 6px; }
+.stats-difficulty h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.diff-intro {
+  margin: 0 0 14px;
+  font-size: .9rem;
+  color: var(--muted);
+}
+.diff-block { margin: 0 0 18px; }
+.diff-block h4 {
+  margin: 0 0 8px;
+  font-size: .95rem;
+  color: var(--secondary);
+}
+.diff-empty {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-strong);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: .9rem;
+}
+.diff-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.diff-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.diff-table-name { font-weight: 800; color: var(--text); }
+.diff-table-status {
+  align-self: flex-start;
+  font-size: .78rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+}
+.diff-table-diff { font-size: .86rem; color: var(--text); }
+.diff-table-attempts { font-size: .82rem; color: var(--muted); }
+
+/* Couleurs des statuts (bordure gauche + badge) */
+.diff-table.status-to_work { border-left-color: var(--danger); }
+.diff-table.status-to_work .diff-table-status { background: var(--danger); }
+.diff-table.status-in_progress { border-left-color: var(--primary); }
+.diff-table.status-in_progress .diff-table-status { background: var(--primary); }
+.diff-table.status-mastered { border-left-color: var(--success); }
+.diff-table.status-mastered .diff-table-status { background: var(--success); }
+.diff-table.status-insufficient { border-left-color: var(--secondary); }
+.diff-table.status-insufficient .diff-table-status { background: var(--secondary); }
+
+
 /* Boîtes de graphiques */
 .chart-block { margin: 22px 0 6px; }
 .chart-block h3 { margin: 0 0 12px; font-size: 1.05rem; }

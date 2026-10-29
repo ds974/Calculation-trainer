@@ -64,7 +64,9 @@ try {
     $users = new UserRepository($db->pdo());
     $auth = new AuthService($db->pdo(), $users);
     $resultRepository = new ResultRepository($db->pdo());
-    $results = new ResultService($db->pdo(), $resultRepository);
+    $difficultyRepository = new OperationDifficultyRepository($db->pdo());
+    $difficulty = new OperationDifficultyService($db->pdo(), $difficultyRepository);
+    $results = new ResultService($db->pdo(), $resultRepository, $difficulty);
     $stats = new StatsService($resultRepository);
     $adminRepository = new AdminRepository($db->pdo());
     $admin = new AdminService($db->pdo(), $auth, $users, $adminRepository);
@@ -138,6 +140,12 @@ try {
 
         case 'result/save':
             // Enregistre une partie terminée pour l'utilisateur connecté.
+            // v12.4 : si le client fournit un `mission_id` stable et le détail
+            // individuel des réponses (`details`), l'enregistrement est ATOMIQUE
+            // (résultat + mémoire des difficultés) et IDEMPOTENT (un même
+            // mission_id n'est écrit qu'une seule fois). Sans ces nouvelles
+            // données, on retombe sur l'ancien comportement (`save`), préservant
+            // la rétrocompatibilité avec les anciens clients.
             Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
             $user = $auth->currentUser();
             if ($user === null) {
@@ -146,6 +154,32 @@ try {
             $playedAt = isset($parsed['played_at']) && is_string($parsed['played_at'])
                 ? $parsed['played_at']
                 : null;
+
+            $hasMission = isset($parsed['mission_id']) && is_string($parsed['mission_id'])
+                && trim($parsed['mission_id']) !== ''
+                && isset($parsed['details']) && is_array($parsed['details']);
+
+            if ($hasMission) {
+                $outcome = $results->saveWithMission(
+                    (int)$user['id'],
+                    (string)($parsed['mode'] ?? ''),
+                    (int)($parsed['score'] ?? -1),
+                    (string)$parsed['mission_id'],
+                    $parsed['details'],
+                    $playedAt,
+                    (string)($parsed['question_type'] ?? 'classic')
+                );
+                if ($outcome['duplicate']) {
+                    // Mission déjà enregistrée : réponse de succès cohérente au
+                    // client, SANS seconde écriture (idempotence respectée).
+                    Response::success([
+                        'result'  => ['id' => null],
+                        'duplicate' => true,
+                    ], 200);
+                }
+                Response::success(['result' => ['id' => $outcome['id']]], 201);
+            }
+
             $resultId = $results->save(
                 (int)$user['id'],
                 (string)($parsed['mode'] ?? ''),
@@ -175,7 +209,13 @@ try {
             $mode = isset($_GET['mode']) && is_string($_GET['mode'])
                 ? $_GET['mode']
                 : (string)($parsed['mode'] ?? '');
-            Response::success($stats->stats((int)$user['id'], $mode));
+            // v12.4 : on enrichit les statistiques avec le bilan « Mes points à
+            // travailler » (mémoire des difficultés par table), indépendant du
+            // mode sélectionné. Rétrocompatible : les champs existants sont
+            // conservés, seule la clé `difficulty` est ajoutée.
+            $statsData = $stats->stats((int)$user['id'], $mode);
+            $statsData['difficulty'] = $results->difficultySummary((int)$user['id']);
+            Response::success($statsData);
             break;
 
         // NOTE v12.2 : la route `result/import` (import des anciennes parties

@@ -69,6 +69,25 @@ const GuestHistoryV12 = (() => {
     );
   }
 
+  /**
+   * Génère un identifiant unique et stable de mission (v12.4).
+   *
+   * Un même mission_id identifie UNE mission donnée et est conservé lors des
+   * tentatives de sauvegarde répétées (bouton « Réessayer », double POST) :
+   * le serveur s'en sert pour garantir l'idempotence (une seule écriture).
+   */
+  function makeMissionId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return "v124-" + window.crypto.randomUUID();
+    }
+    return (
+      "v124-" +
+      Date.now().toString(36) +
+      "-" +
+      Math.random().toString(36).slice(2, 10)
+    );
+  }
+
   /** Mappe un mode frontend ("mult"/"add") vers le mode serveur. */
   function serverMode(mode) {
     return mode === "add" ? "addition" : "multiplication";
@@ -116,7 +135,11 @@ const GuestHistoryV12 = (() => {
 
   /**
    * Enregistre une partie terminée.
-   * @param {{mode:string, score:number, playedAt?:string}} part mode "mult"/"add".
+   * @param {{mode:string, score:number, playedAt?:string, questionType?:string,
+   *          missionId?:string, details?:Array<object>}} part
+   *        mode "mult"/"add". `missionId` et `details` (v12.4) sont facultatifs et
+   *        utilisés UNIQUEMENT pour un compte connecté : ils alimentent la mémoire
+   *        des difficultés (idempotente). En mode invité, ils sont ignorés.
    * @return {Promise<object>} {server:false, entry} (invite) / {server:true, ok} (connecte).
    */
   async function record(part) {
@@ -127,12 +150,19 @@ const GuestHistoryV12 = (() => {
       : "classic";
 
     if (session) {
-      const res = await api("result/save", {
+      const payload = {
         mode,
         score: part.score,
         played_at: playedAt,
         question_type: questionType,
-      });
+      };
+      // v12.4 : détail individuel des réponses + mission_id stable => mémoire
+      // des difficultés personnelles côté serveur (atomique et idempotente).
+      if (part.missionId && Array.isArray(part.details) && part.details.length) {
+        payload.mission_id = part.missionId;
+        payload.details = part.details;
+      }
+      const res = await api("result/save", payload);
       return { server: true, ok: res.ok };
     }
 
@@ -154,6 +184,7 @@ const GuestHistoryV12 = (() => {
     toUtcSecondsIso,
     record,
     loadAll,
+    makeMissionId,
     get hasSession() {
       return session !== null;
     },

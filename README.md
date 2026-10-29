@@ -1,4 +1,4 @@
-# Mission Calcul Mental — Version 12.3 (comptes, statistiques, administration, questions à trou)
+# Mission Calcul Mental — Version 12.4 (comptes, statistiques, administration, questions à trou, difficultés personnelles)
 
 Application pédagogique de calcul mental (multiplications et additions), 10 questions
 par mission, chronomètre et animation de fusée.
@@ -18,6 +18,11 @@ La **v12.3** améliore aussi le **retour pédagogique** après une réponse inco
 (`3 × 6 = 18` avec le *18* en rouge, `? × 6 = 18` → `3 × 6 = 18`, etc.), le chronomètre est
 arrêté, la saisie est verrouillée et la correction reste affichée **4 secondes** avant de
 passer à la question suivante. La transition reste brève (700 ms) après une bonne réponse.
+
+La **v12.4** introduit une **mémoire personnelle des difficultés**, par utilisateur et par
+opération, pour guider l'enfant vers ses points à travailler. Elle fonctionne pour les
+addition et multiplication, en classique comme à trou, sans rien changer au générateur de
+questions ni au fonctionnement des invités.
 
 ---
 
@@ -110,13 +115,16 @@ php tests/http_test.php
 ```
 
 Les **tests JavaScript** (via JavaScript for Automation, sans Node) valident côté client la
-normalisation des dates (historique invité) et le **retour pédagogique** de la v12.3
+normalisation des dates (historique invité), le **retour pédagogique** de la v12.3
 (révélation de la bonne réponse dans l'équation, durée de correction de 4 s, absence de
-double affichage et verrouillage de la saisie) :
+double affichage et verrouillage de la saisie) et le **classement des difficultés** de la
+v12.4 (trie des tables par difficulté décroissante, puis statut et numéro, sans modifier
+la liste source) :
 
 ```bash
 osascript -l JavaScript tests/js_normalization_test.js
 osascript -l JavaScript tests/js_correction_test.js
+osascript -l JavaScript tests/js_difficulty_ui_test.js
 ```
 
 ---
@@ -199,7 +207,6 @@ reste une exigence distincte avant toute exposition publique**, dans l'esprit de
   - `result/save`    (POST) : enregistre une partie terminée (mode, score, played_at,
     `question_type` — `classic` | `hole` | `mixed`, défaut `classic`).
   - `result/history` (GET)  : historique de l'utilisateur connecté.
-  - `result/import`  (POST) : import volontaire et idempotent de l'historique invité.
 - **Limite de confiance** : le score est transmis par le navigateur ; il ne peut pas
   être vérifié côté serveur (pas de preuve anti-triche). Ces valeurs alimentent
   l'historique personnel, mais ne doivent jamais constituer une preuve formelle.
@@ -303,7 +310,7 @@ la session).
 
 - **Session côté serveur** : aucune logique d'authentification parallèle ; on
   réutilise les routes PHP existantes (`auth/csrf`, `auth/login`, `auth/register`,
-  `auth/logout`, `profile`, `profile/password`, `result/import`).
+  `auth/logout`, `profile`, `profile/password`).
 - **Cookies sécurisés** gérés par PHP (`SameSite=Lax` + `HttpOnly`). Aucun mot de
   passe ni cookie de session n'est stocké dans `localStorage` ; seul l'utilisateur
   public et le jeton CSRF sont gardés **en mémoire** (jamais réhydratés au rechargement).
@@ -319,6 +326,84 @@ la session).
 - L'accès au compte est **désactivé pendant une partie en cours** (un message
   l'indique) et la session expirée est détectée proprement (401 → retour à la
   connexion sans perte de données).
+
+---
+
+## Difficultés personnelles (v12.4)
+
+La **v12.4** mémorise, pour chaque utilisateur connecté, la **difficulté par opération**
+(par ex. `6 × 7`) afin d'identifier les tables à travailler. C'est une fonctionnalité de
+**suivi pédagogique** : elle ne modifie ni le générateur de questions, ni l'attribution
+des scores, et fonctionne de façon **inchangée pour les invités** (qui ne disposent pas de
+ce suivi personnalisé).
+
+### Quatre catégories indépendantes
+
+La difficulté est suivie séparément selon **deux axes** :
+
+- **Opération** : `addition` | `multiplication`.
+- **Type de question** : `classic` (classique) | `hole` (à trou).
+
+Soit **quatre catégories** (`addition/classic`, `addition/hole`, `multiplication/classic`,
+`multiplication/hole`), chacune avec sa propre mémoire. Les calculs commutatifs (`6 × 7` et
+`7 × 6`) ainsi que les deux positions du trou comptent ensemble.
+
+### Coefficient de difficulté (0–5)
+
+Chaque opération porte un **coefficient évolutif de 0 à 5** :
+
+- **+1** par **erreur** ou **temps écoulé** ;
+- **−1** toutes les **deux réussites consécutives**.
+
+Le coefficient est borné entre 0 et 5. Une opération dont la difficulté revient à **0**
+est **conservée** (elle reste suivie, mais n'apparaît plus comme point à travailler).
+
+### Bilan « Mes points à travailler »
+
+Une rubrique dédiée dans les statistiques synthétise, **par table** (et non par opération
+individuelle), le statut pédagogique associé :
+
+- `to_work` (à travailler) → `in_progress` (en progrès) → `insufficient` (à pratiquer) →
+  `mastered` (surmontée).
+
+Les tables sont classées, séparément pour le **classique** et pour le **à trou**, par :
+
+1. **coefficient de difficulté décroissant** ;
+2. à difficulté égale, par **statut** (à travailler → en progrès → à pratiquer → surmontée) ;
+3. à statut égal, par **numéro de table croissant**.
+
+### Sauvegarde atomique et idempotente
+
+L'enregistrement d'une partie met à jour la mémoire des difficultés **de façon atomique**
+(transaction SQLite) : soit toutes les opérations de la partie sont prises en compte, soit
+aucune. Le mécanisme protège contre les **doublons** : une même partie n'incrémente la
+difficulté qu'**une seule fois** (même identifiant de partie), même en cas de rejeu ou de
+soumission répétée.
+
+### Tables SQLite
+
+Deux nouvelles tables, créées par une **migration automatique et idempotente** à la
+connexion de la base :
+
+- **`operations_difficulty`** : mémoire actuelle de la difficulté par
+  (utilisateur, mode, type de question, opérande_a, opérande_b).
+- **`mission_difficulty_log`** : journal des occurrences (succès / échec) qui alimente le
+  calcul du coefficient et la détection des réussites consécutives.
+
+### Tests de la v12.4
+
+- **Backend** (`php tests/run.php` et `php tests/http_test.php`) : migration des tables,
+  calcul du coefficient, classification des statuts, enregistrement atomique et protection
+  contre les doublons, ainsi que les routes API associées.
+- **Frontend** (`osascript -l JavaScript tests/js_difficulty_ui_test.js`) : classement des
+  tables par difficulté décroissante puis statut et numéro, séparément pour le classique et
+  le à trou, et non-modification de la liste source.
+
+### Vers la v12.5 — missions adaptatives
+
+La v12.5 consacrera cette mémoire des difficultés aux **missions adaptatives** : environ
+**40 % de questions ciblées** seront tirées des opérations les plus difficiles, pour faire
+travailler précisément les points faibles détectés par la v12.4.
 
 ---
 
