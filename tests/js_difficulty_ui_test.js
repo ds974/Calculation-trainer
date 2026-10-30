@@ -226,10 +226,23 @@ if (!source || source.length === 0) {
     }
 
     if (fu.diff && typeof fu.diff === "function") {
-      // Le coefficient de difficulté reste affiché sans décimales inutiles.
-      check("difficulté 3.0 → « 3 » (pas de décimale)", fu.diff(3.0) === "3", fu.diff(3.0));
-      check("difficulté 4.5 → « 5 » (arrondi entier)", fu.diff(4.5) === "5", fu.diff(4.5));
-      check("difficulté 0.5 → « ½ »", fu.diff(0.5) === "½", fu.diff(0.5));
+      // v12.5 — précision au demi-point avec virgule décimale française.
+      // Le coefficient agrégé est une somme pondérée de 0,5 : on l'affiche au
+      // demi-point le plus proche, sans arrondi entier qui masquait la
+      // progression (2 → 1,5 s'affichait « 2 » dans les deux cas).
+      check("difficulté 0 → « 0 »", fu.diff(0) === "0", fu.diff(0));
+      check("difficulté 0.5 → « 0,5 » (plus de « ½ »)", fu.diff(0.5) === "0,5", fu.diff(0.5));
+      check("difficulté 1 → « 1 » (pas de décimale)", fu.diff(1) === "1", fu.diff(1));
+      check("difficulté 1.5 → « 1,5 » (virgule française)", fu.diff(1.5) === "1,5", fu.diff(1.5));
+      check("difficulté 2 → « 2 »", fu.diff(2) === "2", fu.diff(2));
+      check("difficulté 2.5 → « 2,5 »", fu.diff(2.5) === "2,5", fu.diff(2.5));
+      check("difficulté 3 → « 3 »", fu.diff(3) === "3", fu.diff(3));
+      check("difficulté 4.5 → « 4,5 » (plus d'arrondi entier à 5)", fu.diff(4.5) === "4,5", fu.diff(4.5));
+      // Valeurs décalées par l'arithmétique flottante : ramenées au demi-point utile.
+      check("difficulté 1.4999999… → « 1,5 » (imprécision flottante)", fu.diff(1.5 - 1e-9) === "1,5", fu.diff(1.5 - 1e-9));
+      check("difficulté nulle/négative/non numérique → « 0 »", fu.diff(0.0) === "0" && fu.diff(-1) === "0" && fu.diff(null) === "0", fu.diff(-1));
+      // Progression VISIBLE : 2 → 1,5 s'affiche désormais différemment.
+      check("progression visible : 2 puis 1,5 => affichages « 2 » puis « 1,5 »", fu.diff(2) === "2" && fu.diff(1.5) === "1,5", fu.diff(2) + " / " + fu.diff(1.5));
     }
   }
 }

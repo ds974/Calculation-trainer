@@ -523,6 +523,165 @@ foreach ($mcDave2 as $t) {
 expect('aucune difficulté écrite pour la mission invalide (atomicité)',
     !$badTableSeen, '');
 
+echo "\n=== Test HTTP — opérations difficiles (v12.5) ===\n";
+
+// Un compte isolé (eve) pour ne pas perturber les comptes existants.
+//  - difficulty/operations sans connexion => 401 ;
+//  - connecté : seules SES opérations difficiles (difficulty > 0), diff 0 exclue ;
+//  - filtres par mode, type de question, plage d'additions et tables ;
+//  - isolation : un autre compte (bob) ne voit rien.
+
+$jarEve = sys_get_temp_dir() . "/calc_trainer_jar_eve_{$port}.txt";
+register_shutdown_function(static function () use ($jarEve): void {
+    @unlink($jarEve);
+});
+[$code, $csrfEve] = get_call("{$base}?action=auth/csrf", $jarEve);
+$csrfEveJ = json_decode($csrfEve, true);
+$tokenEve = is_array($csrfEveJ) ? (string)($csrfEveJ['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'eve', 'password' => 'secretpass123', 'csrf_token' => $tokenEve], $jarEve);
+[$code, $logEveBody] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'eve', 'password' => 'secretpass123', 'csrf_token' => $tokenEve], $jarEve);
+$logEve = json_decode($logEveBody, true);
+expect('register/login eve (v12.5)', $code === 200 && isset($logEve['data']['user']), "HTTP {$code}");
+[$code, $csrfEve2] = get_call("{$base}?action=auth/csrf", $jarEve);
+$csrfEve2J = json_decode($csrfEve2, true);
+$tokenEve2 = is_array($csrfEve2J) ? (string)($csrfEve2J['data']['token'] ?? '') : '';
+
+// Amorçage de données de difficulté via result/save (mission_id + détails).
+// Chaque mission porte UNE opération répétée N fois en erreur pour atteindre la
+// difficulté visée ; une mission en réussite crée une diff 0 (exclue).
+$seed = function (string $mid, string $mode, string $qt, int $a, int $b, int $errors, int $ok = 0) use ($base, $jarEve, $tokenEve2): array {
+    $correct = $qt === 'hole'
+        ? $a // trou sur le 1er opérande : la bonne réponse est l'opérande manquant `a`.
+        : ($mode === 'multiplication' ? $a * $b : $a + $b);
+    $details = [];
+    for ($i = 0; $i < $errors; $i++) {
+        $details[] = ['mode' => $mode, 'question_type' => $qt, 'a' => $a, 'b' => $b,
+            'hole' => $qt === 'hole' ? 'a' : null,
+            'user_answer' => ($qt === 'hole' ? $a : ($mode === 'multiplication' ? $a * $b : $a + $b)) + 1];
+    }
+    for ($i = 0; $i < $ok; $i++) {
+        $details[] = ['mode' => $mode, 'question_type' => $qt, 'a' => $a, 'b' => $b,
+            'hole' => $qt === 'hole' ? 'a' : null, 'user_answer' => $correct];
+    }
+    $score = $ok; // 1 point par réussite (0-10), cohérent avec le score contractuel.
+    return http_call('POST', $base, [
+        'action' => 'result/save', 'mode' => $mode, 'score' => $score,
+        'mission_id' => $mid, 'details' => $details, 'question_type' => $qt,
+        'csrf_token' => $tokenEve2,
+    ], $jarEve);
+};
+
+// 6×7 mult classic : 4 erreurs => diff 4.
+[$code] = $seed('E-M-001', 'multiplication', 'classic', 6, 7, 4);
+// 3×9 mult classic : 2 erreurs => diff 2.
+[$code] = $seed('E-M-002', 'multiplication', 'classic', 3, 9, 2);
+// 4×5 mult classic : 4 réussites => diff 0 (doit être EXCLUE).
+[$code] = $seed('E-M-003', 'multiplication', 'classic', 4, 5, 0, 4);
+// 2×2 mult hole : 3 erreurs => diff 3.
+[$code] = $seed('E-M-004', 'multiplication', 'hole', 2, 2, 3);
+// 5+6 addition classic : 1 erreur => diff 1.
+[$code] = $seed('E-M-005', 'addition', 'classic', 5, 6, 1);
+// 9+14 addition hole : 2 erreurs => diff 2.
+[$code] = $seed('E-M-006', 'addition', 'hole', 9, 14, 2);
+expect('amorçage des difficultés de eve (result/save)', $code === 201, "HTTP {$code}");
+
+// Anonyme : 401 (authentification obligatoire).
+$jarAnonEve = sys_get_temp_dir() . "/calc_trainer_jar_anon_eve_{$port}.txt";
+register_shutdown_function(static function () use ($jarAnonEve): void { @unlink($jarAnonEve); });
+[$code] = get_call("{$base}?action=difficulty/operations", $jarAnonEve);
+expect('difficulty/operations sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// Connectée, sans filtre : SEULES ses opérations difficiles, diff 0 exclue.
+[$code, $opsRaw] = get_call("{$base}?action=difficulty/operations", $jarEve);
+$opsJ = json_decode($opsRaw, true);
+$ops = is_array($opsJ) && is_array($opsJ['data']['operations'] ?? null) ? $opsJ['data']['operations'] : [];
+$keyfn = fn(array $o): string => ($o['mode'] ?? '') . '|' . ($o['question_type'] ?? '')
+    . '|' . (int)($o['a'] ?? 0) . '|' . (int)($o['b'] ?? 0);
+$opsMap = [];
+foreach ($ops as $o) { $opsMap[$keyfn($o)] = $o; }
+expect('difficulty/operations connecté => 200 et liste', $code === 200 && is_array($opsJ['data']['operations'] ?? null), "HTTP {$code}");
+expect('eve : 5 opérations difficiles (diff 0 exclue)', count($ops) === 5, 'nb=' . count($ops));
+expect('opération maîtrisée 4×5 (diff 0) absente', !isset($opsMap['multiplication|classic|4|5']));
+expect('6×7 présent avec difficulté 4', isset($opsMap['multiplication|classic|6|7'])
+    && (int)$opsMap['multiplication|classic|6|7']['difficulty'] === 4);
+$shapeOk = true;
+foreach ($ops as $o) {
+    foreach (['mode', 'question_type', 'a', 'b', 'difficulty'] as $f) {
+        if (!array_key_exists($f, $o)) { $shapeOk = false; }
+    }
+}
+expect('chaque opération expose mode/question_type/a/b/difficulty', $shapeOk);
+
+// Bob (compte sans difficultés) ne voit rien (isolation).
+[$code, $opsBob] = get_call("{$base}?action=difficulty/operations", $jarBob);
+$opsBobJ = json_decode($opsBob, true);
+$opsBobCount = is_array($opsBobJ) && is_array($opsBobJ['data']['operations'] ?? null) ? count($opsBobJ['data']['operations']) : -1;
+expect('isolation bob : aucune opération', $code === 200 && $opsBobCount === 0, "HTTP {$code} (nb={$opsBobCount})");
+
+// Filtrer par mode.
+[$code, $opsMult] = get_call("{$base}?action=difficulty/operations&mode=multiplication", $jarEve);
+$opsMultJ = json_decode($opsMult, true);
+$opsMultArr = is_array($opsMultJ['data']['operations'] ?? null) ? $opsMultJ['data']['operations'] : [];
+$multOnly = true;
+foreach ($opsMultArr as $o) { if (($o['mode'] ?? '') !== 'multiplication') { $multOnly = false; } }
+expect('filtre mode=multiplication : 3 opérations, toutes multiplications', count($opsMultArr) === 3 && $multOnly, 'nb=' . count($opsMultArr));
+
+[$code, $opsAdd] = get_call("{$base}?action=difficulty/operations&mode=addition", $jarEve);
+$opsAddJ = json_decode($opsAdd, true);
+$opsAddArr = is_array($opsAddJ['data']['operations'] ?? null) ? $opsAddJ['data']['operations'] : [];
+$addOnly = true;
+foreach ($opsAddArr as $o) { if (($o['mode'] ?? '') !== 'addition') { $addOnly = false; } }
+expect('filtre mode=addition : 2 opérations, toutes additions', count($opsAddArr) === 2 && $addOnly, 'nb=' . count($opsAddArr));
+
+// Filtrer par type de question.
+[$code, $opsClassic] = get_call("{$base}?action=difficulty/operations&question_type=classic", $jarEve);
+$opsClassicJ = json_decode($opsClassic, true);
+$opsClassicArr = is_array($opsClassicJ['data']['operations'] ?? null) ? $opsClassicJ['data']['operations'] : [];
+$classicOnly = true;
+foreach ($opsClassicArr as $o) { if (($o['question_type'] ?? '') !== 'classic') { $classicOnly = false; } }
+expect('filtre question_type=classic : 3 opérations classiques', count($opsClassicArr) === 3 && $classicOnly, 'nb=' . count($opsClassicArr));
+
+[$code, $opsHole] = get_call("{$base}?action=difficulty/operations&question_type=hole", $jarEve);
+$opsHoleJ = json_decode($opsHole, true);
+$opsHoleArr = is_array($opsHoleJ['data']['operations'] ?? null) ? $opsHoleJ['data']['operations'] : [];
+$holeOnly = true;
+foreach ($opsHoleArr as $o) { if (($o['question_type'] ?? '') !== 'hole') { $holeOnly = false; } }
+expect('filtre question_type=hole : 2 opérations à trou', count($opsHoleArr) === 2 && $holeOnly, 'nb=' . count($opsHoleArr));
+
+// Filtrer par plage d'additions (5-10) : 9+14 exclu (14 hors plage).
+[$code, $opsRange] = get_call("{$base}?action=difficulty/operations&mode=addition&add_min=5&add_max=10", $jarEve);
+$opsRangeJ = json_decode($opsRange, true);
+$opsRangeArr = is_array($opsRangeJ['data']['operations'] ?? null) ? $opsRangeJ['data']['operations'] : [];
+expect('plage additions 5-10 : seule 5+6 (9+14 exclu)', count($opsRangeArr) === 1
+    && (int)($opsRangeArr[0]['a'] ?? 0) === 5 && (int)($opsRangeArr[0]['b'] ?? 0) === 6,
+    'nb=' . count($opsRangeArr));
+
+// Filtrer par tables autorisées (2,3) : seule 2×2 (les deux opérandes dans {2,3}).
+[$code, $opsTables] = get_call("{$base}?action=difficulty/operations&mode=multiplication&tables=2,3", $jarEve);
+$opsTablesJ = json_decode($opsTables, true);
+$opsTablesArr = is_array($opsTablesJ['data']['operations'] ?? null) ? $opsTablesJ['data']['operations'] : [];
+expect('tables 2,3 : seule 2×2 (6×7 et 3×9 exclus)', count($opsTablesArr) === 1
+    && (int)($opsTablesArr[0]['a'] ?? 0) === 2 && (int)($opsTablesArr[0]['b'] ?? 0) === 2,
+    'nb=' . count($opsTablesArr));
+
+// Filtres invalides => 400 (validation stricte).
+[$code] = get_call("{$base}?action=difficulty/operations&mode=division", $jarEve);
+expect('mode invalide => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=difficulty/operations&question_type=trou", $jarEve);
+expect('type de question invalide => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=difficulty/operations&tables=0,13", $jarEve);
+expect('table hors limites => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=difficulty/operations&add_min=50&add_max=10", $jarEve);
+expect('plage incohérente (min>max) => 400', $code === 400, "HTTP {$code}");
+
+// Non-régression : les API existantes répondent toujours correctement.
+[$code] = get_call("{$base}?action=health", $jar);
+expect('non-régression : health répond toujours 200', $code === 200, "HTTP {$code}");
+[$code, $histEve] = get_call("{$base}?action=result/history", $jarEve);
+$histEveJ = json_decode($histEve, true);
+$histEveCount = is_array($histEveJ['data']['history'] ?? null) ? count($histEveJ['data']['history']) : -1;
+expect('non-régression : result/history de eve toujours fonctionnel', $code === 200 && $histEveCount === 6, "HTTP {$code} (nb={$histEveCount})");
+
 echo "\n=== Test HTTP — administration (v12.1) ===\n";
 
 // 1. Amorçage direct d'un administrateur dans la base jetable. register crée

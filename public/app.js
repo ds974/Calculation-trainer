@@ -58,6 +58,9 @@ const DEFAULT_CONFIG = {
   mode: "mult",
   questionType: "classic",
   timePerQuestion: 5,
+  // v12.5 — entraînement adaptatif activé par défaut. Les anciennes configs
+  // (sans cette propriété) sont considérées comme activées : on retombe ici.
+  adaptive: true,
   mult: { tables: [2,3,4,5,6,7,8,9] },
   add: { min: 1, max: 20 }
 };
@@ -286,6 +289,13 @@ function buildConfigControls() {
     radio.addEventListener("change", handleQuestionTypeChange);
   });
 
+  // v12.5 — entraînement adaptatif (case à cocher).
+  const adaptiveBox = document.querySelector("[data-adaptive-option]");
+  if (adaptiveBox) {
+    adaptiveBox.checked = state.config.adaptive === true;
+    adaptiveBox.addEventListener("change", handleAdaptiveChange);
+  }
+
   buildTableCheckboxes();
   buildRangeInputs();
 
@@ -339,6 +349,8 @@ function syncConfigControls() {
   document.querySelectorAll("[data-question-type-option]").forEach((radio) => {
     radio.checked = radio.value === state.config.questionType;
   });
+  const adaptiveBox = document.querySelector("[data-adaptive-option]");
+  if (adaptiveBox) adaptiveBox.checked = state.config.adaptive === true;
   document.querySelectorAll("#tableCheckboxes input[type='checkbox']").forEach((checkbox) => {
     checkbox.checked = state.config.mult.tables.includes(Number(checkbox.value));
   });
@@ -372,6 +384,13 @@ function handleQuestionTypeChange(event) {
   state.config.questionType = value;
   saveConfig();
   syncConfigControls();
+}
+
+// v12.5 — bascule de l'entraînement adaptatif. La préférence est persistée
+// comme toutes les autres options, dans localStorage.
+function handleAdaptiveChange(event) {
+  state.config.adaptive = event.target.checked === true;
+  saveConfig();
 }
 
 // Met à jour le titre de l'accueil et la description selon le mode choisi.
@@ -435,39 +454,144 @@ function startMission() {
     showScreen("configScreen");
     return;
   }
-  state.questions = generateUniqueQuestions();
-  state.currentIndex = 0;
-  state.score = 0;
-  state.results = [];
-  state.finalScore = null;
-  state.savedCurrentResult = false;
-  state.finalSavePromise = null;
-  state.launchInProgress = false;
-  // v12.4 : identifiant stable et unique de LA mission. Conservé lors des
-  // tentatives de sauvegarde répétées ; le serveur s'en sert pour garantir
-  // l'idempotence (une seule écriture par mission_id).
-  if (window.MissionGuestHistory && typeof window.MissionGuestHistory.makeMissionId === "function") {
-    state.missionId = window.MissionGuestHistory.makeMissionId();
-  } else {
-    state.missionId = null;
+  // v12.5 — Étape 2C : intégration de l'entraînement adaptatif.
+  // Le démarrage est asynchrone (il peut attendre la réponse de
+  // `difficulty/operations`). Un verrou interne empêche tout double lancement
+  // pendant le chargement des difficultés.
+  if (state.launchInProgress) return;
+  state.launchInProgress = true;
+  generateMissionQuestions().then((questions) => {
+    state.launchInProgress = false;
+    state.questions = questions;
+    state.currentIndex = 0;
+    state.score = 0;
+    state.results = [];
+    state.finalScore = null;
+    state.savedCurrentResult = false;
+    state.finalSavePromise = null;
+    // v12.4 : identifiant stable et unique de LA mission. Conservé lors des
+    // tentatives de sauvegarde répétées ; le serveur s'en sert pour garantir
+    // l'idempotence (une seule écriture par mission_id).
+    if (window.MissionGuestHistory && typeof window.MissionGuestHistory.makeMissionId === "function") {
+      state.missionId = window.MissionGuestHistory.makeMissionId();
+    } else {
+      state.missionId = null;
+    }
+
+    document.getElementById("playerName").value = "";
+    document.getElementById("nameWarning").textContent = "";
+    document.getElementById("missionReward").textContent = "";
+    // Le bloc « Prénom » est de nouveau visible au départ d'une mission : sa
+    // visibilité sera ajustée à la fin selon que l'on est connecté ou invité.
+    const nameBlock = document.querySelector(".name-block");
+    if (nameBlock) nameBlock.hidden = false;
+    const saveStatus = document.getElementById("saveStatus");
+    if (saveStatus) {
+      saveStatus.hidden = true;
+      saveStatus.textContent = "";
+      saveStatus.className = "inline-message save-status";
+    }
+    resetRocket();
+    showScreen("gameScreen");
+    presentQuestion();
+  });
+}
+
+/**
+ * v12.5 — Produit la liste des questions de la mission, en appliquant
+ * l'entraînement adaptatif lorsque les conditions sont réunies, sinon le
+ * générateur ordinaire existant.
+ *
+ * Conditions de l'adaptatif (v12.5, étape 2C) :
+ *  - utilisateur connecté (une mémoire personnelle existe) ;
+ *  - option « M'entraîner sur mes difficultés » activée ;
+ *  - moteur `AdaptiveGenerator` chargé (fichier adaptive-generator.js).
+ *
+ * Dans ce cas on interroge UNE SEULE FOIS `difficulty/operations` avec les
+ * filtres correspondant aux paramètres réels de la mission, on attend la
+ * réponse, puis on confie le pool ordinaire complet + les difficultés au moteur.
+ * Un repli propre vers le générateur ordinaire est garanti en cas
+ * d'indisponibilité de l'API ou d'absence de difficultés compatibles. Une
+ * véritable erreur de programmation du moteur n'est PAS masquée silencieusement
+ * (elle se propage).
+ *
+ * @return {Promise<Array<{a,b,mode,hole}>>}
+ */
+async function generateMissionQuestions() {
+  const ordinary = () => generateUniqueQuestions();
+
+  if (!isConnected()) return ordinary();
+  if (state.config.adaptive !== true) return ordinary();
+  if (typeof window.AdaptiveGenerator === "undefined" ||
+      typeof window.AdaptiveGenerator.adaptiveGenerateQuestions !== "function") {
+    return ordinary();
   }
 
-  document.getElementById("playerName").value = "";
-  document.getElementById("nameWarning").textContent = "";
-  document.getElementById("missionReward").textContent = "";
-  // Le bloc « Prénom » est de nouveau visible au départ d'une mission : sa
-  // visibilité sera ajustée à la fin selon que l'on est connecté ou invité.
-  const nameBlock = document.querySelector(".name-block");
-  if (nameBlock) nameBlock.hidden = false;
-  const saveStatus = document.getElementById("saveStatus");
-  if (saveStatus) {
-    saveStatus.hidden = true;
-    saveStatus.textContent = "";
-    saveStatus.className = "inline-message save-status";
+  // Récupération des difficultés (filtres = paramètres réels de la mission).
+  const difficulties = await fetchDifficulties();
+  if (!difficulties) return ordinary();
+
+  // Pool ORDINAIRE complet réutilisé (source unique de vérité des calculs).
+  const normalPool = buildQuestionPool();
+  const result = window.AdaptiveGenerator.adaptiveGenerateQuestions(
+    normalPool,
+    difficulties,
+    {
+      mode: state.config.mode,
+      questionType: state.config.questionType,
+      mult: { tables: state.config.mult.tables },
+      add: { min: state.config.add.min, max: state.config.add.max }
+    }
+  );
+
+  // Le moteur renvoie null lorsque l'adaptation ne s'applique pas (aucune
+  // difficulté compatible, ou désactivée) : on conserve le comportement actuel.
+  return result || ordinary();
+}
+
+/**
+ * v12.5 — Interroge `difficulty/operations` avec les filtres correspondant aux
+ * paramètres réels de la mission. Renvoie le tableau des opérations difficiles,
+ * ou `null` en cas d'indisponibilité de l'API (repli propre vers la mission
+ * ordinaire, sans bloquer l'élève ni masquer une erreur de programmation).
+ *
+ * @return {Promise<Array|null>}
+ */
+async function fetchDifficulties() {
+  try {
+    // Délégation à AccountUI.api (GET), déjà chargé par account.js.
+    if (typeof window.AccountUI === "undefined" || typeof window.AccountUI.api !== "function") {
+      return null;
+    }
+    const params = difficultyFilters();
+    const res = await window.AccountUI.api("difficulty/operations", params, "GET");
+    if (!res.ok) return null;
+    return Array.isArray(res.data && res.data.operations) ? res.data.operations : [];
+  } catch (_e) {
+    // Indisponibilité réseau / API : repli ordinaire. Un éventuel problème de
+    // programmation se manifesterait ailleurs (fonctions appelées plus haut).
+    return null;
   }
-  resetRocket();
-  showScreen("gameScreen");
-  presentQuestion();
+}
+
+/**
+ * v12.5 — Filtres transmis à `difficulty/operations`, alignés sur les valeurs
+ * du serveur (`multiplication`/`addition`, `classic`/`hole`/`mixed`, tables,
+ * plage d'additions) et les paramètres réels de la mission.
+ */
+function difficultyFilters() {
+  const filters = {};
+  const mode = state.config.mode;
+  filters.mode = mode === "add" ? "addition" : "multiplication";
+  // "mixed" signifie « les deux » (classic ET hole) côté serveur, cohérent.
+  filters["question_type"] = state.config.questionType;
+  if (mode === "mult") {
+    filters.tables = state.config.mult.tables.join(",");
+  } else {
+    filters.add_min = String(state.config.add.min);
+    filters.add_max = String(state.config.add.max);
+  }
+  return filters;
 }
 
 // Nombre de calculs distincts (sans doublons commutatifs) disponibles selon le mode courant.
@@ -500,32 +624,8 @@ function validateQuestionPool() {
 }
 
 function generateUniqueQuestions() {
-  const mode = state.config.mode;
   const questionType = state.config.questionType;
-  let pool;
-
-  if (mode === "add") {
-    const { min, max } = state.config.add;
-    pool = [];
-    for (let a = min; a <= max; a++) {
-      for (let b = a; b <= max; b++) {
-        pool.push({ a, b, mode });
-      }
-    }
-  } else {
-    // Multiplication : produit cartésien des tables cochées, sans duplication
-    const tables = state.config.mult.tables;
-    pool = [];
-    for (const a of tables) {
-      for (const b of tables) {
-        // Pour éviter les duplicatas comme 6×7 et 7×6, on ne prend que les couples où a <= b
-        if (a <= b) {
-          pool.push({ a, b, mode });
-        }
-      }
-    }
-  }
-
+  const pool = buildQuestionPool();
   // Fisher-Yates : chaque couple n'apparaît qu'une seule fois dans la mission.
   shuffleArray(pool);
   const selected = pool.slice(0, QUESTION_COUNT);
@@ -557,6 +657,41 @@ function generateUniqueQuestions() {
 
   // classique (défaut) : aucune question à trou.
   return selected;
+}
+
+/**
+ * v12.5 — Construit le pool ORDINAIRE complet (toutes les paires {a, b, mode}
+ * uniques, sans doublon commutatif) selon les paramètres courants.
+ *
+ * Réutilisée à la fois par le générateur ordinaire (generateUniqueQuestions) et
+ * par l'entraînement adaptatif (qui doit disposer de la TOTALITÉ du pool pour
+ * sélectionner ses questions ciblées). Il s'agit de la SEULE source de vérité
+ * pour la création des calculs : on ne développe pas un second moteur.
+ */
+function buildQuestionPool() {
+  const mode = state.config.mode;
+  let pool = [];
+
+  if (mode === "add") {
+    const { min, max } = state.config.add;
+    for (let a = min; a <= max; a++) {
+      for (let b = a; b <= max; b++) {
+        pool.push({ a, b, mode });
+      }
+    }
+  } else {
+    // Multiplication : produit cartésien des tables cochées, sans duplication
+    // commutative (6×7 et 7×6) — on ne retient que les couples où a <= b.
+    const tables = state.config.mult.tables;
+    for (const a of tables) {
+      for (const b of tables) {
+        if (a <= b) {
+          pool.push({ a, b, mode });
+        }
+      }
+    }
+  }
+  return pool;
 }
 
 function shuffleArray(array) {
@@ -1241,7 +1376,11 @@ function normalizeConfig(config) {
     ? config.questionType
     : DEFAULT_CONFIG.questionType;
 
-  return { mode, questionType, timePerQuestion, mult: { tables }, add: { min, max } };
+  // v12.5 — entraînement adaptatif : employé par défaut (true), y compris pour
+  // les anciennes configurations qui ne possèdent pas cette propriété.
+  const adaptive = config?.adaptive !== false;
+
+  return { mode, questionType, timePerQuestion, adaptive, mult: { tables }, add: { min, max } };
 }
 
 function saveConfig() {

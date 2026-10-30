@@ -110,6 +110,15 @@
           </div>
         </fieldset>
 
+        <fieldset class="config-group adaptive-setting" aria-labelledby="adaptiveTitle">
+          <legend id="adaptiveTitle">Entraînement adaptatif</legend>
+          <label class="adaptive-option">
+            <input type="checkbox" id="adaptiveCheckbox" data-adaptive-option>
+            <span>M’entraîner sur mes difficultés</span>
+          </label>
+          <p class="muted small-muted adaptive-hint">Les calculs qui vous posent problème seront proposés plus souvent.</p>
+        </fieldset>
+
         <p id="tableWarning" class="inline-message" aria-live="polite"></p>
 
         <div class="config-group time-setting">
@@ -508,6 +517,7 @@
   <div id="accountToast" class="account-toast" role="status" aria-live="polite" hidden></div>
 
   <script src="guest-history.js"></script>
+  <script src="adaptive-generator.js"></script>
   <script src="app.js"></script>
   <script src="vendor/chart.js/chart.umd.min.js"></script>
   <script src="stats.js"></script>

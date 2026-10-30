@@ -69,6 +69,10 @@ final class TestRunner
         $this->testDifficultyIdempotenceAtomicity();
         $this->testDifficultyValidation();
         $this->testDifficultyTableSummary();
+        // v12.5 — récupération des opérations difficiles (route difficulty/operations).
+        $this->testDifficultyOperations();
+        // v12.5 — suivi en mode Mélange : classification individuelle classique/à trou.
+        $this->testDifficultyMelangeTracking();
 
         // Étape 6 : statistiques personnelles (backend).
         $this->testStatsAggregation();
@@ -1703,6 +1707,184 @@ final class TestRunner
             'pas de double comptage : totaux de la rubrique classique préservés (diff 5, essais 6)');
     }
 
+    /**
+     * v12.5 — Récupération des opérations NON maîtrisées (difficulty > 0).
+     * Vérifie directement OperationDifficultyRepository::difficultOperations() :
+     * isolation par utilisateur, exclusion des difficultés nulles, filtrage par
+     * mode, type de question, plage d'additions et tables de multiplications.
+     */
+    private function testDifficultyOperations(): void
+    {
+        echo "[v12.5 — opérations difficiles (référentiel)]\n";
+        $h = $this->difficultyHarness();
+        $pdo = $h['pdo'];
+        $repo = $h['repo'];
+        $svc = $h['svc'];
+        $uid = $h['userId'];
+
+        $by = function (array $rows): array {
+            $map = [];
+            foreach ($rows as $r) {
+                $key = $r['mode'] . '|' . $r['question_type'] . '|'
+                    . $r['operand_a'] . '|' . $r['operand_b'];
+                $map[$key] = $r;
+            }
+            return $map;
+        };
+
+        // --- Amorçage de données représentatives --------------------------------
+        // Multiplication classic, diff 4 (4 erreurs) : 6×7.
+        for ($i = 0; $i < 4; $i++) { $svc->applyBarème($uid, 'multiplication', 'classic', 6, 7, false); }
+        // Multiplication classic, diff 2 (2 erreurs) : 3×9.
+        for ($i = 0; $i < 2; $i++) { $svc->applyBarème($uid, 'multiplication', 'classic', 3, 9, false); }
+        // Multiplication hole, diff 3 : 2×2.
+        for ($i = 0; $i < 3; $i++) { $svc->applyBarème($uid, 'multiplication', 'hole', 2, 2, false); }
+        // Multiplication classic maîtrisée (diff 0) : 4×5 => doit être EXCLUE.
+        for ($i = 0; $i < 4; $i++) { $svc->applyBarème($uid, 'multiplication', 'classic', 4, 5, true); }
+        // Addition classic, diff 1 : 5+6.
+        $svc->applyBarème($uid, 'addition', 'classic', 5, 6, false);
+        // Addition hole, diff 2 : 9+14.
+        for ($i = 0; $i < 2; $i++) { $svc->applyBarème($uid, 'addition', 'hole', 9, 14, false); }
+
+        // --- Sans filtre : toutes les difficultés > 0 de l'utilisateur ----------
+        $all = $repo->difficultOperations($uid);
+        $map = $by($all);
+        $this->check(count($all) === 5,
+            'sans filtre : 5 opérations difficiles renvoyées (les diff 0 exclues)');
+        $this->check(!isset($map['multiplication|classic|4|5']),
+            'opération maîtrisée (difficulty 0) exclue');
+        $this->check(isset($map['multiplication|classic|6|7'])
+            && (int)$map['multiplication|classic|6|7']['difficulty'] === 4,
+            'difficulté la plus élevée (6×7, diff 4) présente');
+
+        // --- Filtrage par mode ---------------------------------------------------
+        $mult = $by($repo->difficultOperations($uid, 'multiplication'));
+        $this->check(count($mult) === 3 && !isset($mult['addition|classic|5|6'])
+            && !isset($mult['addition|hole|9|14']),
+            'filtre multiplication : seules les multiplications sont renvoyées');
+
+        $add = $by($repo->difficultOperations($uid, 'addition'));
+        $this->check(count($add) === 2 && !isset($add['multiplication|classic|6|7']),
+            'filtre addition : seules les additions sont renvoyées');
+
+        // --- Filtrage par type de question --------------------------------------
+        $classic = $by($repo->difficultOperations($uid, null, ['classic']));
+        $this->check(count($classic) === 3
+            && !isset($classic['multiplication|hole|2|2'])
+            && !isset($classic['addition|hole|9|14']),
+            'filtre classic : seules les questions classiques');
+
+        $hole = $by($repo->difficultOperations($uid, null, ['hole']));
+        $this->check(count($hole) === 2 && !isset($hole['multiplication|classic|6|7'])
+            && !isset($hole['addition|classic|5|6']),
+            'filtre hole : seules les questions à trou');
+
+        // 'mixed' = les deux réunis : équivaut à l'absence de filtre.
+        $mixed = $by($repo->difficultOperations($uid, null, ['classic', 'hole']));
+        $this->check(count($mixed) === 5,
+            'filtre mixed (classic + hole) : les deux types réunis');
+
+        // --- Plage d'additions (5..10) ------------------------------------------
+        $range = $by($repo->difficultOperations($uid, 'addition', [], 5, 10));
+        $this->check(count($range) === 1 && isset($range['addition|classic|5|6'])
+            && !isset($range['addition|hole|9|14']),
+            'plage additions 5-10 : 9+14 exclu (opérande 14 hors plage)');
+
+        // --- Tables autorisées pour les multiplications --------------------------
+        // tables {2,3} : 2×2 a ses deux opérandes dans {2,3} ; 3×9 (9) et 6×7 (6,7)
+        // sont exclus car un opérande est hors des tables cochées.
+        $tables = $by($repo->difficultOperations($uid, 'multiplication', [], null, null, [2, 3]));
+        $this->check(count($tables) === 1 && isset($tables['multiplication|hole|2|2'])
+            && !isset($tables['multiplication|classic|6|7'])
+            && !isset($tables['multiplication|classic|3|9']),
+            'tables {2,3} : 6×7 et 3×9 exclus (opérandes hors tables), seul 2×2 retenu');
+
+        // --- Filtres combinés : multiplication + classic + tables {3,6,9} ---------
+        $comb = $by($repo->difficultOperations($uid, 'multiplication', ['classic'], null, null, [3, 6, 9]));
+        $this->check(count($comb) === 1 && isset($comb['multiplication|classic|3|9'])
+            && !isset($comb['multiplication|classic|6|7'])
+            && !isset($comb['multiplication|hole|2|2']),
+            'filtres combinés (mult + classic + tables 3/6/9) : 3×9 retenu, 6×7 exclu (7 hors tables)');
+
+        // --- Isolation : un second utilisateur ne voit AUCUN résultat -------------
+        $users = new UserRepository($pdo);
+        $uid2 = $users->create([
+            'login' => 'diff2_' . substr(uniqid(), -6),
+            'password' => 'motdepasse10',
+            'role' => 'user',
+        ]);
+        $other = $repo->difficultOperations($uid2);
+        $this->check(count($other) === 0,
+            'isolation : un autre utilisateur ne voit aucune difficulté du premier');
+    }
+    /**
+     * v12.5 — Suivi des difficultés en mode Mélange (diagnostic).
+     *
+     * Chaque question d'une mission `mixed` doit être enregistrée selon son
+     * type INDIVIDUEL : classic => ligne classic, hole => ligne hole. Le type
+     * global `mixed` ne doit jamais remplacer le type individuel.
+     *
+     * Scénario : classic 6×8 = 2 et hole 6×8 = 2 ; deux missions `mixed`
+     * distinctes chacune avec UNE bonne réponse CLASSIQUE 6×8.
+     * Attendu : classic 2 → 1 ; hole inchangé (2) ; contribution à la table 8
+     * classique 1 → 0,5 (barème : −1 après deux réussites consécutives sur la
+     * MÊME opération et le MÊME type).
+     */
+    private function testDifficultyMelangeTracking(): void
+    {
+        echo "[v12.5 — suivi en mode Mélange (classique / à trou)]\n";
+        $h = $this->difficultyHarness();
+        $repo = $h['repo'];
+        $svc = $h['svc'];
+        $results = $h['results'];
+        $uid = $h['userId'];
+
+        $detail = function (string $qt, int $a, int $b, bool $correct, ?string $hole = null, bool $timeout = false): array {
+            if ($qt === 'classic') {
+                return [['mode' => 'multiplication', 'question_type' => 'classic',
+                    'a' => $a, 'b' => $b, 'hole' => null,
+                    'user_answer' => $timeout ? null : ($a * $b)]];
+            }
+            $hl = $hole ?? 'a';
+            return [['mode' => 'multiplication', 'question_type' => 'hole',
+                'a' => $a, 'b' => $b, 'hole' => $hl,
+                'user_answer' => $timeout ? null : ($hl === 'a' ? $a : $b)]];
+        };
+
+        // Amorçage : classic 6×8 = 2 et hole 6×8 = 2 (2 erreurs chacun).
+        $svc->applyBarème($uid, 'multiplication', 'classic', 6, 8, false);
+        $svc->applyBarème($uid, 'multiplication', 'classic', 6, 8, false);
+        $svc->applyBarème($uid, 'multiplication', 'hole', 6, 8, false);
+        $svc->applyBarème($uid, 'multiplication', 'hole', 6, 8, false);
+        $this->check((int)$repo->find($uid, 'multiplication', 'classic', 6, 8)['difficulty'] === 2,
+            'point de départ : classic 6×8 = 2');
+        $this->check((int)$repo->find($uid, 'multiplication', 'hole', 6, 8)['difficulty'] === 2,
+            'point de départ : hole 6×8 = 2');
+
+        // Deux missions DISTINCTES de type global 'mixed', chacune 1 réussite CLASSIQUE 6×8.
+        $results->saveWithMission($uid, 'multiplication', 1, 'MEL-C-1',
+            $detail('classic', 6, 8, true), '2026-04-01T08:00:00Z', 'mixed');
+        $results->saveWithMission($uid, 'multiplication', 1, 'MEL-C-2',
+            $detail('classic', 6, 8, true), '2026-04-02T08:00:00Z', 'mixed');
+
+        $c = (int)$repo->find($uid, 'multiplication', 'classic', 6, 8)['difficulty'];
+        $hl = (int)$repo->find($uid, 'multiplication', 'hole', 6, 8)['difficulty'];
+        $this->check($c === 1, '2 réussites classiques => classic 2 → 1', "got=$c");
+        $this->check($hl === 2, 'à trou inchangé (hole reste 2)', "got=$hl");
+
+        $summary = $svc->tableSummary($uid);
+        $t8 = null;
+        foreach ($summary['multiplication']['classic'] as $row) {
+            if ((int)$row['table'] === 8) { $t8 = $row; break; }
+        }
+        $this->check($t8 !== null && abs((float)$t8['difficulty'] - 0.5) < 0.001,
+            'contribution à la table 8 classique = 0,5 (difficulty 1 × 0,5 poids)',
+            $t8 ? 'difficulty=' . (float)$t8['difficulty'] : 'table 8 absente');
+    }
+
+
+
 }
 $runner = new TestRunner();
 exit($runner->run());
+

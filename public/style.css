@@ -246,6 +246,36 @@ footer {
 }
 .table-option input { accent-color: var(--primary); }
 
+/* v12.5 — entraînement adaptatif : case à cocher « M'entraîner sur mes
+   difficultés » dans la configuration. */
+.adaptive-setting {
+  margin: 24px 0;
+  padding: 14px 16px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+.adaptive-setting legend {
+  margin-bottom: 8px;
+}
+.adaptive-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.adaptive-option input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  flex: 0 0 auto;
+}
+.adaptive-hint {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
 .number-control { display: flex; align-items: center; gap: 10px; }
 input[type="number"], input[type="text"] {
   border: 1px solid #9cadb2;

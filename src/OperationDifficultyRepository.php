@@ -129,4 +129,81 @@ final class OperationDifficultyRepository
         $stmt->execute(['user_id' => $userId]);
         return $stmt->fetchAll();
     }
+
+    /**
+     * Opérations NON maîtrisées (difficulty > 0) d'un utilisateur, filtrées
+     * pour une mission d'entraînement (v12.5). L'identifiant utilisateur est
+     * TOUJOURS imposé côté serveur : on ne renvoie jamais les données d'un
+     * autre utilisateur, quels que soient les filtres passés.
+     *
+     * @param int         $userId   identifiant de l'utilisateur connecté.
+     * @param string|null $mode     'multiplication' | 'addition' (null = tous).
+     * @param array<int,string> $questionTypes liste de type de questions
+     *        autorisés parmi 'classic' | 'hole' (vide = les deux).
+     * @param int|null    $addMin   borne inférieure de la plage addition (null = toute).
+     * @param int|null    $addMax   borne supérieure de la plage addition (null = toute).
+     * @param array<int,int> $multTables tables autorisées pour la multiplication
+     *        (vide = toutes). Chaque opérande doit appartenir à cette liste.
+     *
+     * @return array<int,array<string,mixed>> chaque ligne, avec au moins
+     *         mode, question_type, operand_a, operand_b, difficulty.
+     */
+    public function difficultOperations(
+        int $userId,
+        ?string $mode = null,
+        array $questionTypes = [],
+        ?int $addMin = null,
+        ?int $addMax = null,
+        array $multTables = []
+    ): array {
+        $where = ['user_id = :user_id', 'difficulty > 0'];
+        $params = ['user_id' => $userId];
+
+        if ($mode !== null) {
+            $where[] = 'mode = :mode';
+            $params['mode'] = $mode;
+        }
+
+        if ($questionTypes !== []) {
+            $holders = [];
+            foreach ($questionTypes as $i => $qt) {
+                $holders[] = ':qt' . $i;
+                $params['qt' . $i] = $qt;
+            }
+            $where[] = 'question_type IN (' . implode(', ', $holders) . ')';
+        }
+
+        // La plage de nombres ne s'applique qu'aux additions : les deux opérandes
+        // doivent appartenir à [addMin, addMax].
+        if ($addMin !== null) {
+            $where[] = 'operand_a >= :add_min AND operand_b >= :add_min';
+            $params['add_min'] = $addMin;
+        }
+        if ($addMax !== null) {
+            $where[] = 'operand_a <= :add_max AND operand_b <= :add_max';
+            $params['add_max'] = $addMax;
+        }
+
+        // Les tables autorisées ne s'appliquent qu'aux multiplications : chaque
+        // opérande doit figurer parmi les tables cochées (les opérandes sont déjà
+        // normalisés a <= b, on teste néanmoins les deux bornes par sûreté).
+        if ($multTables !== []) {
+            $holders = [];
+            foreach ($multTables as $i => $t) {
+                $holders[] = ':tbl' . $i;
+                $params['tbl' . $i] = $t;
+            }
+            $in = implode(', ', $holders);
+            $where[] = "(operand_a IN ({$in}) AND operand_b IN ({$in}))";
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT mode, question_type, operand_a, operand_b, difficulty
+             FROM operations_difficulty
+             WHERE ' . implode(' AND ', $where) . '
+             ORDER BY difficulty DESC, id ASC'
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
 }

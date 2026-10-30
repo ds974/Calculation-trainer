@@ -1,4 +1,4 @@
-# Mission Calcul Mental — Version 12.4 (comptes, statistiques, administration, questions à trou, difficultés personnelles)
+# Mission Calcul Mental — Version 12.5 (comptes, statistiques, administration, questions à trou, difficultés personnelles, entraînement adaptatif)
 
 Application pédagogique de calcul mental (multiplications et additions), 10 questions
 par mission, chronomètre et animation de fusée.
@@ -24,6 +24,15 @@ opération, pour guider l'enfant vers ses points à travailler. Elle fonctionne 
 addition et multiplication, en classique comme à trou, sans rien changer au générateur de
 questions ni au fonctionnement des invités.
 
+La **v12.5** exploite cette mémoire pour l'**entraînement adaptatif** : une option
+« **M'entraîner sur mes difficultés** », activée par défaut et désactivable, cible
+précisément les points faibles détectés par la v12.4. Environ **40 % des questions** sont
+tirées des opérations les plus difficiles (coeff de difficulté le plus élevé d'abord), les
+60 % restants restant ordinaires. Une nouvelle API `difficulty/operations` fournit les
+opérations classées, chargées au lancement de chaque mission. La répartition 5
+classiques / 5 à trou est conservée en mode Mélange, et tout revient à un comportement
+normal pour les invités ou en l'absence de difficultés compatibles.
+
 ---
 
 ## Architecture (étape 1 — backend PHP + SQLite)
@@ -34,6 +43,7 @@ calculation-trainer/
 │   ├── index.html              # Application monopage (jeu v11, SPA)
 │   ├── style.css               # Thème spatial, SVG & animations
 │   ├── app.js                  # Logique du jeu (chargé après guest-history.js)
+│   ├── adaptive-generator.js   # Générateur adaptatif v12.5 (40 % de questions ciblées)
 │   ├── guest-history.js        # Historique & import invité v12
 │   ├── account.js              # Interface compte : connexion, inscription, profil, import
 │   └── api/index.php           # Front controller des API (auth + résultats)
@@ -119,12 +129,16 @@ normalisation des dates (historique invité), le **retour pédagogique** de la v
 (révélation de la bonne réponse dans l'équation, durée de correction de 4 s, absence de
 double affichage et verrouillage de la saisie) et le **classement des difficultés** de la
 v12.4 (trie des tables par difficulté décroissante, puis statut et numéro, sans modifier
-la liste source) :
+la liste source) et le **générateur adaptatif** de la v12.5 (sélection des 40 % ciblés,
+priorité aux coefficients les plus élevés, retour à la fréquence ordinaire, respect des
+types et de la répartition Mélange) :
 
 ```bash
 osascript -l JavaScript tests/js_normalization_test.js
 osascript -l JavaScript tests/js_correction_test.js
 osascript -l JavaScript tests/js_difficulty_ui_test.js
+osascript -l JavaScript tests/js_adaptive_generator_test.js
+osascript -l JavaScript tests/js_adaptive_integration_test.js
 ```
 
 ---
@@ -401,9 +415,47 @@ connexion de la base :
 
 ### Vers la v12.5 — missions adaptatives
 
-La v12.5 consacrera cette mémoire des difficultés aux **missions adaptatives** : environ
-**40 % de questions ciblées** seront tirées des opérations les plus difficiles, pour faire
-travailler précisément les points faibles détectés par la v12.4.
+---
+
+## Entraînement adaptatif (v12.5)
+
+La **v12.5** transforme la mémoire des difficultés de la v12.4 en **missions adaptatives**.
+Une option « **M'entraîner sur mes difficultés** » est **activée par défaut** et peut être
+désactivée par le joueur.
+
+### Fonctionnement
+
+- Sur une mission, environ **40 % des questions sont ciblées** et **60 % restent
+  ordinaires**.
+- Les questions ciblées sont tirées des opérations les plus difficiles : **priorité aux
+  coefficients de difficulté les plus élevés** (classés par difficulté décroissante).
+- Lorsqu'une difficulté revient à **0**, l'opération **revient à la fréquence ordinaire**.
+- Les **paramètres de calcul** (tables, multiplication/addition) sont respectés, ainsi que
+  les types **Classique**, **À trou** et **Mélange**.
+- En mode **Mélange**, la répartition est conservée à **5 classiques / 5 à trou**.
+- Le comportement reste **normal pour les invités** ou **en l'absence de difficultés
+  compatibles** (aucune question ciblée à tirer → uniquement des questions ordinaires).
+
+### API et intégration
+
+- Nouvelle API **`difficulty/operations`** : renvoie les opérations en difficulté, classées
+  par coefficient décroissant.
+- Les difficultés sont **chargées au lancement de chaque mission** (et non en cache figé).
+- Les coefficients agrégés sont affichés avec une **précision au demi-point** (ex. `3.5`).
+
+### Implémentation
+
+- **`public/adaptive-generator.js`** : générateur adaptatif (sélection des 40 % ciblés,
+  priorité aux coefficients élevés, respect des types et de la répartition Mélange).
+
+### Tests de la v12.5
+
+- **Backend** : `php tests/difficulty_melange_repro.php` (répartition 5/5 en Mélange) ;
+  les routes `difficulty/operations` sont couvertes par `php tests/run.php` et
+  `php tests/http_test.php`.
+- **Frontend** : `osascript -l JavaScript tests/js_adaptive_generator_test.js` (logique du
+  générateur) et `tests/js_adaptive_integration_test.js` (intégration avec le chargement
+  des difficultés et l'option).
 
 ---
 

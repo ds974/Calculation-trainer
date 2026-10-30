@@ -19,6 +19,8 @@ declare(strict_types=1);
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
  *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
+ *  - difficulty/operations (GET)  : opérations non maîtrisées de l'utilisateur
+ *                                   connecté (v12.5, missions adaptatives).
  *
  *  Routes d'administration (réservées au rôle `admin`, vérifié côté serveur) :
  *  - admin/users           (GET)  : liste des comptes + recherche (option q).
@@ -216,6 +218,112 @@ try {
             $statsData = $stats->stats((int)$user['id'], $mode);
             $statsData['difficulty'] = $results->difficultySummary((int)$user['id']);
             Response::success($statsData);
+            break;
+
+        case 'difficulty/operations':
+            // v12.5 — Opérations NON maîtrisées (difficulty > 0) de l'utilisateur
+            // connecté, destinées aux missions adaptatives. Authentification
+            // obligatoire ; l'identifiant est TOUJOURS pris dans la session, et
+            // les filtres sont strictement validés avant exécution (requêtes
+            // préparées). Aucune donnée d'un autre utilisateur n'est accessible.
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            $userId = (int)$user['id'];
+
+            // -- mode (facultatif) : multiplication | addition -------------------
+            $mode = isset($_GET['mode']) && is_string($_GET['mode'])
+                ? trim($_GET['mode'])
+                : null;
+            if ($mode !== null && $mode !== '' && !Validator::mode($mode)) {
+                Response::error('Mode de jeu invalide.', 400);
+            }
+            if ($mode === '') {
+                $mode = null;
+            }
+
+            // -- type de question (facultatif) : classic | hole | mixed ----------
+            // 'mixed' signifie « les deux » (classic ET hole), cohérent avec le
+            // libellé côté application pour les missions en mode Mélange.
+            $qtRaw = isset($_GET['question_type']) && is_string($_GET['question_type'])
+                ? trim($_GET['question_type'])
+                : '';
+            $questionTypes = [];
+            if ($qtRaw !== '') {
+                if (!in_array($qtRaw, ['classic', 'hole', 'mixed'], true)) {
+                    Response::error('Type de question invalide.', 400);
+                }
+                $questionTypes = $qtRaw === 'mixed'
+                    ? ['classic', 'hole']
+                    : [$qtRaw];
+            }
+
+            // -- plage d'additions (facultatif) ---------------------------------
+            $addMin = isset($_GET['add_min']) && is_string($_GET['add_min'])
+                && $_GET['add_min'] !== ''
+                ? filter_var($_GET['add_min'], FILTER_VALIDATE_INT)
+                : null;
+            $addMax = isset($_GET['add_max']) && is_string($_GET['add_max'])
+                && $_GET['add_max'] !== ''
+                ? filter_var($_GET['add_max'], FILTER_VALIDATE_INT)
+                : null;
+            if ($addMin === false || $addMax === false) {
+                Response::error('Borne de plage invalide.', 400);
+            }
+            if ($addMin !== null && ($addMin < 1 || $addMin > 99)) {
+                Response::error('Borne de plage hors limites (1-99).', 400);
+            }
+            if ($addMax !== null && ($addMax < 1 || $addMax > 99)) {
+                Response::error('Borne de plage hors limites (1-99).', 400);
+            }
+            if ($addMin !== null && $addMax !== null && $addMin > $addMax) {
+                Response::error('Borne minimale supérieure à la borne maximale.', 400);
+            }
+            // On n'applique la plage que pour les additions (ou en l'absence de
+            // mode précis) ; pour une multiplication seule, une plage d'additions
+            // est ignorée car sans objet.
+
+            // -- tables autorisées (facultatif) ----------------------------------
+            $tablesRaw = isset($_GET['tables']) && is_string($_GET['tables'])
+                ? $_GET['tables']
+                : '';
+            $multTables = [];
+            if ($tablesRaw !== '') {
+                $seen = [];
+                foreach (explode(',', $tablesRaw) as $part) {
+                    $part = trim($part);
+                    if ($part === '' || !filter_var($part, FILTER_VALIDATE_INT)
+                        || (int)$part < 1 || (int)$part > 10) {
+                        Response::error('Table autorisée invalide (1-10).', 400);
+                    }
+                    $seen[(int)$part] = true;
+                }
+                $multTables = array_map('intval', array_keys($seen));
+            }
+
+            $operations = $difficultyRepository->difficultOperations(
+                $userId,
+                $mode,
+                $questionTypes,
+                $addMin,
+                $addMax,
+                $multTables
+            );
+
+            // Normalisation des champs publics (même forme qu'en base, sans
+            // colonnes parasites) et conversion des clés en minuscules homogènes.
+            $normalized = [];
+            foreach ($operations as $op) {
+                $normalized[] = [
+                    'mode'          => (string)$op['mode'],
+                    'question_type' => (string)$op['question_type'],
+                    'a'             => (int)$op['operand_a'],
+                    'b'             => (int)$op['operand_b'],
+                    'difficulty'    => (int)$op['difficulty'],
+                ];
+            }
+            Response::success(['operations' => $normalized]);
             break;
 
         // NOTE v12.2 : la route `result/import` (import des anciennes parties

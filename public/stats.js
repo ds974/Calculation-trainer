@@ -273,13 +273,22 @@ const StatsUI = (() => {
     };
   }
 
-  /** Affiche une difficulté (0 à 5) de façon lisible pour un enfant. */
+  /**
+   * Affiche un coefficient de difficulté agrégé (0 à 5) avec une précision au
+   * demi-point.
+   *
+   * Les agrégats par table sont des sommes de contributions pondérées de 0,5
+   * (un calcul commutatif 6×7 et 7×6 compte pour 0,5 sur chaque table) : on les
+   * restitue donc au demi-point le plus proche, formatés avec une virgule
+   * décimale française et sans décimale terminale inutile. Une difficulté qui
+   * baisse de 2 à 1,5 devient ainsi visible, là où l'ancien arrondi entier
+   * affichait « 2 » dans les deux cas.
+   */
   function formatDiff(value) {
     const n = Number(value);
-    if (!Number.isFinite(n)) return "0";
-    if (n <= 0.05) return "0";
-    if (n <= 0.6) return "½";
-    return String(Math.round(n));
+    if (!Number.isFinite(n) || n <= 0) return "0";
+    const half = Math.round(n * 2) / 2; // précision au demi-point
+    return half.toFixed(1).replace(/\.0$/, "").replace(".", ",");
   }
 
   /**
