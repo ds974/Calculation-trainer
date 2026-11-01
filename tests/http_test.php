@@ -218,6 +218,115 @@ expect('profile après logout => 401', $code === 401, "HTTP {$code}");
 [$code] = get_call("{$base}?action=inexistante", $jar);
 expect('action inconnue => 404', $code === 404, "HTTP {$code}");
 
+echo "\n=== Test HTTP — préférence linguistique (v12.6-C1) ===\n";
+
+// Session dédiée pour le test de langue (cookie jar indépendant).
+$jarLang = sys_get_temp_dir() . "/calc_trainer_jar_lang_{$port}.txt";
+$csrfLang = json_decode(get_call("{$base}?action=auth/csrf", $jarLang)[1], true);
+$tokenLang = is_array($csrfLang) ? (string)($csrfLang['data']['token'] ?? '') : '';
+expect('csrf langage (session dédiée)', $tokenLang !== '');
+
+// Inscription AVEC langue : la langue doit être enregistrée et renvoyée.
+[$code, $regLang] = http_call('POST', $base, [
+    'action' => 'auth/register', 'login' => 'lingua',
+    'password' => 'secretpass123', 'preferred_language' => 'es', 'csrf_token' => $tokenLang,
+], $jarLang);
+$regLangJ = json_decode($regLang, true);
+expect('register avec preferred_language=es => 201', $code === 201, "HTTP {$code}");
+expect('la langue es est renvoyée à l\'inscription',
+    ($regLangJ['data']['user']['preferred_language'] ?? '') === 'es',
+    (string)($regLangJ['data']['user']['preferred_language'] ?? ''));
+
+// Inscription SANS langue : valeur par défaut 'fr'.
+[$code, $regNoLang] = http_call('POST', $base, [
+    'action' => 'auth/register', 'login' => 'lingua2',
+    'password' => 'secretpass123', 'csrf_token' => $tokenLang,
+], $jarLang);
+$regNoLangJ = json_decode($regNoLang, true);
+expect('register sans langue => 201', $code === 201, "HTTP {$code}");
+expect('la langue par défaut est fr',
+    ($regNoLangJ['data']['user']['preferred_language'] ?? '') === 'fr',
+    (string)($regNoLangJ['data']['user']['preferred_language'] ?? ''));
+
+// Inscription avec une langue NON autorisée => rejetée (400).
+[$code] = http_call('POST', $base, [
+    'action' => 'auth/register', 'login' => 'linguaBad', 'password' => 'secretpass123',
+    'preferred_language' => 'en-US', 'csrf_token' => $tokenLang,
+], $jarLang);
+expect('register avec langue non autorisée (en-US) => 400', $code === 400, "HTTP {$code}");
+
+// Connexion : la langue enregistrée est renvoyée.
+[$code, $loginLang] = http_call('POST', $base, [
+    'action' => 'auth/login', 'login' => 'lingua', 'password' => 'secretpass123', 'csrf_token' => $tokenLang,
+], $jarLang);
+$loginLangJ = json_decode($loginLang, true);
+expect('login lingua => 200', $code === 200, "HTTP {$code}");
+expect('la langue es est renvoyée au login',
+    ($loginLangJ['data']['user']['preferred_language'] ?? '') === 'es',
+    (string)($loginLangJ['data']['user']['preferred_language'] ?? ''));
+
+// Profil : la langue enregistrée est renvoyée.
+[$code, $profLang] = get_call("{$base}?action=profile", $jarLang);
+$profLangJ = json_decode($profLang, true);
+expect('profile lingua => 200', $code === 200, "HTTP {$code}");
+expect('la langue es est renvoyée au profil',
+    ($profLangJ['data']['user']['preferred_language'] ?? '') === 'es',
+    (string)($profLangJ['data']['user']['preferred_language'] ?? ''));
+$linguaId = (int)($profLangJ['data']['user']['id'] ?? 0);
+
+// Modification de la préférence (connecté, CSRF) : fr->es->zh-Hans.
+[$code, $updZh] = http_call('POST', $base, [
+    'action' => 'profile/language', 'preferred_language' => 'zh-Hans', 'csrf_token' => $tokenLang,
+], $jarLang);
+$updZhJ = json_decode($updZh, true);
+expect('profile/language vers zh-Hans => 200', $code === 200, "HTTP {$code}");
+expect('zh-Hans enregistrée et renvoyée',
+    ($updZhJ['data']['user']['preferred_language'] ?? '') === 'zh-Hans',
+    (string)($updZhJ['data']['user']['preferred_language'] ?? ''));
+
+// Persistance après reconnaissance : la langue doit rester zh-Hans.
+[$code] = http_call('POST', $base, ['action' => 'auth/logout', 'csrf_token' => $tokenLang], $jarLang);
+$csrfLang2 = json_decode(get_call("{$base}?action=auth/csrf", $jarLang)[1], true);
+$tokenLang2 = is_array($csrfLang2) ? (string)($csrfLang2['data']['token'] ?? '') : '';
+[$code, $relog] = http_call('POST', $base, [
+    'action' => 'auth/login', 'login' => 'lingua', 'password' => 'secretpass123', 'csrf_token' => $tokenLang2,
+], $jarLang);
+expect('reconnexion lingua => 200', $code === 200, "HTTP {$code}");
+$relogJ = json_decode($relog, true);
+expect('la langue zh-Hans persiste après reconnexion',
+    ($relogJ['data']['user']['preferred_language'] ?? '') === 'zh-Hans',
+    (string)($relogJ['data']['user']['preferred_language'] ?? ''));
+
+// Valeur invalide => 400.
+[$code] = http_call('POST', $base, [
+    'action' => 'profile/language', 'preferred_language' => 'de', 'csrf_token' => $tokenLang2,
+], $jarLang);
+expect('profile/language avec langue non autorisée => 400', $code === 400, "HTTP {$code}");
+
+// Sans jeton CSRF => 403.
+[$code] = http_call('POST', $base, ['action' => 'profile/language', 'preferred_language' => 'en'], $jarLang);
+expect('profile/language sans CSRF => 403', $code === 403, "HTTP {$code}");
+
+// Sans connexion => 401.
+$jarAnon = sys_get_temp_dir() . "/calc_trainer_jar_anon_{$port}.txt";
+$csrfAnon = json_decode(get_call("{$base}?action=auth/csrf", $jarAnon)[1], true);
+$tokenAnon = is_array($csrfAnon) ? (string)($csrfAnon['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, [
+    'action' => 'profile/language', 'preferred_language' => 'en', 'csrf_token' => $tokenAnon,
+], $jarAnon);
+expect('profile/language sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// Le rôle, le statut et les données du compte restent inchangés après le
+// changement de langue (vérification sur le profil).
+[$code, $profAfter] = get_call("{$base}?action=profile", $jarLang);
+$profAfterJ = json_decode($profAfter, true);
+expect('rôle inchangé après changement de langue',
+    ($profAfterJ['data']['user']['role'] ?? '') === 'user',
+    (string)($profAfterJ['data']['user']['role'] ?? ''));
+expect('identifiant du compte inchangé (même id)',
+    (int)($profAfterJ['data']['user']['id'] ?? 0) === $linguaId,
+    (string)($profAfterJ['data']['user']['id'] ?? 0));
+
 echo "\n=== Test HTTP — résultats et historique (étape 3) ===\n";
 
 // Après le logout précédent, la session a été détruite : on récupère un

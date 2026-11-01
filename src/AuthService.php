@@ -37,7 +37,8 @@ final class AuthService
      * Inscription d'un nouvel utilisateur.
      *
      * @param array<string,mixed> $data login, password (et optionnellement un
-     *        champ `email` résiduel d'un ancien client, désormais IGNORÉ).
+     *        champ `email` résiduel d'un ancien client, désormais IGNORÉ, ainsi
+     *        qu'une `preferred_language` facultative, défaut 'fr').
      * @return array<string,mixed> l'utilisateur public (sans empreinte).
      * @throws InvalidArgumentException si validation ou unicité échouée.
      */
@@ -47,6 +48,19 @@ final class AuthService
         $password = (string)($data['password'] ?? '');
         // L'e-mail n'est plus géré : même si un ancien client le transmet,
         // il est ignoré et jamais stocké (la colonne reste à NULL).
+
+        // Préférence linguistique facultative : si elle est fournie, elle doit
+        // être une des langues canoniques (fr/en/es/zh-Hans). Absente => 'fr'.
+        $preferredLanguage = 'fr';
+        if (array_key_exists('preferred_language', $data)) {
+            $lang = (string)$data['preferred_language'];
+            if (!Validator::language($lang)) {
+                throw new InvalidArgumentException(
+                    'Langue non reconnue. Valeurs acceptées : fr, en, es, zh-Hans.'
+                );
+            }
+            $preferredLanguage = $lang;
+        }
 
         // Validation côté serveur.
         $err = Validator::login($login)
@@ -62,9 +76,10 @@ final class AuthService
         }
 
         $id = $this->users->create([
-            'login'    => $login,
-            'password' => $password,
-            'role'     => 'user',
+            'login'              => $login,
+            'password'           => $password,
+            'role'               => 'user',
+            'preferred_language' => $preferredLanguage,
         ]);
 
         return $this->publicUser($this->users->findById($id));
@@ -175,6 +190,32 @@ final class AuthService
     }
 
     /**
+     * Modifie la préférence linguistique de l'utilisateur connecté (v12.6-C1).
+     *
+     * Ne s'applique qu'au compte passé (celui de la session authentifiée) et ne
+     * modifie que la langue : le rôle, le statut, le mot de passe, les
+     * statistiques et les historiques restent strictement inchangés.
+     *
+     * @throws InvalidArgumentException si la langue est invalide.
+     * @throws RuntimeException si l'utilisateur est introuvable.
+     * @return array<string,mixed> l'utilisateur public actualisé.
+     */
+    public function changeLanguage(int $userId, string $language): array
+    {
+        if (!Validator::language($language)) {
+            throw new InvalidArgumentException(
+                'Langue non reconnue. Valeurs acceptées : fr, en, es, zh-Hans.'
+            );
+        }
+        $user = $this->users->findById($userId);
+        if ($user === null) {
+            throw new RuntimeException('Utilisateur introuvable.', 404);
+        }
+        $this->users->updatePreferredLanguage($userId, $language);
+        return $this->publicUser($this->users->findById($userId));
+    }
+
+    /**
      * Vérifie que l'utilisateur possède le rôle administrateur.
      *
      * @throws RuntimeException code 401 si non authentifié, 403 si non admin.
@@ -198,12 +239,13 @@ final class AuthService
     public function publicUser(array $row): array
     {
         return [
-            'id'            => (int)$row['id'],
-            'login'         => (string)$row['login'],
-            'role'          => (string)$row['role'],
-            'created_at'    => (string)$row['created_at'],
-            'is_active'     => isset($row['is_active']) ? (int)$row['is_active'] === 1 : true,
-            'last_login_at' => isset($row['last_login_at']) ? (string)$row['last_login_at'] : null,
+            'id'                 => (int)$row['id'],
+            'login'              => (string)$row['login'],
+            'role'               => (string)$row['role'],
+            'created_at'         => (string)$row['created_at'],
+            'is_active'          => isset($row['is_active']) ? (int)$row['is_active'] === 1 : true,
+            'last_login_at'      => isset($row['last_login_at']) ? (string)$row['last_login_at'] : null,
+            'preferred_language' => isset($row['preferred_language']) ? (string)$row['preferred_language'] : 'fr',
         ];
     }
 

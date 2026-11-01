@@ -91,8 +91,50 @@ function init() {
   bindAnswerInput();
   bindNumericKeypad();
   resetRocket();
-  updateHomeTitle();
+  // v12.6-B3.1 — régénère tous les textes dynamiques quand la langue change
+  // (titre d'accueil, paramètres, classements, rapport de mission), sans
+  // jamais relancer une mission ni toucher aux données de la partie en cours.
+  if (window.I18N && window.I18N.onLocaleChange) {
+    window.I18N.onLocaleChange(() => refreshI18n());
+  }
+  refreshI18n();
   showScreen("homeScreen");
+}
+
+/**
+ * v12.6-B3.1 — Re-rend les textes dynamiques dans la langue courante après un
+ * changement de langue. Les éléments purement statiques sont déjà traduits par
+ * le moteur (attributs data-i18n) ; seuls les textes générés par app.js sont ici
+ * régénérés, en fonction de l'écran actif.
+ */
+function refreshI18n() {
+  updateHomeTitle();
+
+  // Paramètres : rebaptise les cases « Table de N » sans perdre la sélection.
+  document.querySelectorAll("#tableCheckboxes .table-option span").forEach((labelEl) => {
+    const input = labelEl.parentElement && labelEl.parentElement.querySelector("input[type='checkbox']");
+    if (input) {
+      labelEl.textContent = i18nT("config.tableTitle", { table: input.value }, `Table de ${input.value}`);
+    }
+  });
+
+  // Si un avertissement est affiché, on le régénère dans la langue courante.
+  const warning = document.getElementById("tableWarning");
+  if (warning && warning.textContent) {
+    warning.textContent = validateQuestionPool() || "";
+  }
+
+  // Classement du menu.
+  const leaderboardScreen = document.getElementById("leaderboardScreen");
+  if (leaderboardScreen && leaderboardScreen.classList.contains("active")) {
+    switchLeaderboardMode(state.config.mode);
+  }
+
+  // Rapport de mission (sans toucher à la progression ni aux réponses saisies).
+  const resultScreen = document.getElementById("resultScreen");
+  if (resultScreen && resultScreen.classList.contains("active") && state.finalScore) {
+    renderResultContent();
+  }
 }
 
 function bindActions() {
@@ -166,7 +208,10 @@ function questionDisplay(q) {
 function questionCorrectionHTML(q) {
   const symbol = operatorSymbol(q.mode);
   const answer = computeAnswer(q);
-  const reveal = (v) => `<span class="answer-reveal" aria-label="réponse : ${v}">${v}</span>`;
+  // Le libellé d'accessibilité est traduit ; la valeur (calculée, non saisie
+  // par l'utilisateur) est interpolée en toute sécurité dans cet HTML.
+  const revealLabel = i18nT("feedback.answerReveal", null, "réponse : {value}");
+  const reveal = (v) => `<span class="answer-reveal" aria-label="${revealLabel.replace("{value}", v)}">${v}</span>`;
   if (q.hole === "a") return `${reveal(q.a)} ${symbol} ${q.b} = ${answer}`;
   if (q.hole === "b") return `${q.a} ${symbol} ${reveal(q.b)} = ${answer}`;
   return `${q.a} ${symbol} ${q.b} = ${reveal(answer)}`;
@@ -179,7 +224,32 @@ function operatorSymbol(modeKey = state.config.mode) {
 
 function modeLabel(modeKey = state.config.mode) {
   const mode = MODES[modeKey] || MODES[DEFAULT_CONFIG.mode];
-  return mode.label;
+  return i18nT(mode.key === "add" ? "config.modeAddition" : "config.modeMultiplication", null, mode.label);
+}
+
+// ---- v12.6-B3.1 — Accès au moteur i18n (repli français tant que le moteur
+// n'est pas prêt, afin de ne jamais exposer une clé technique à l'écran). ----
+function i18nReady() {
+  const I = window.I18N;
+  return !!(I && I.isReady && I.isReady());
+}
+function i18nT(key, vars, fallback) {
+  const I = window.I18N;
+  if (I && typeof I.t === "function") return I.t(key, vars);
+  return fallback;
+}
+function i18nPl(baseKey, count, vars, fallback) {
+  const I = window.I18N;
+  if (I && typeof I.pl === "function") return I.pl(baseKey, count, vars);
+  return fallback;
+}
+
+// Libellé traduit d'un type de question (classique / à trou / mélange).
+function questionTypeLabel(type) {
+  const key = type === "hole" ? "config.questionTypeHole"
+    : type === "mixed" ? "config.questionTypeMixed"
+    : "config.questionTypeClassic";
+  return i18nT(key, null, (QUESTION_TYPES[type] || {}).label || type);
 }
 
 function bindAnswerInput() {
@@ -322,7 +392,7 @@ function buildTableCheckboxes() {
     checkbox.addEventListener("change", handleTableChange);
 
     const text = document.createElement("span");
-    text.textContent = `Table de ${table}`;
+    text.textContent = i18nT("config.tableTitle", { table }, `Table de ${table}`);
 
     label.append(checkbox, text);
     container.appendChild(label);
@@ -395,13 +465,23 @@ function handleAdaptiveChange(event) {
 
 // Met à jour le titre de l'accueil et la description selon le mode choisi.
 function updateHomeTitle() {
+  const I = window.I18N;
+  const mode = state.config.mode;
   const title = document.getElementById("homeTitle");
   const subtitle = document.getElementById("homeSubtitle");
-  if (title) title.textContent = `Mission ${modeLabel()}`;
-  if (subtitle) {
-    subtitle.textContent = state.config.mode === "add"
-      ? "10 additions, un chrono et une fusée à construire."
-      : "10 calculs, un chrono et une fusée à construire.";
+  // Comportement inchangé si le moteur i18n n'est pas prêt (repli français).
+  if (I && I.isReady && I.isReady()) {
+    if (title) title.textContent = I.t("home.title");
+    if (subtitle) {
+      subtitle.textContent = I.t(mode === "add" ? "home.subtitleAddition" : "home.subtitleMultiplication");
+    }
+  } else {
+    if (title) title.textContent = `Mission ${modeLabel()}`;
+    if (subtitle) {
+      subtitle.textContent = mode === "add"
+        ? "10 additions, un chrono et une fusée à construire."
+        : "10 calculs, un chrono et une fusée à construire.";
+    }
   }
 }
 
@@ -610,7 +690,7 @@ function poolSize() {
 function validateQuestionPool() {
   if (state.config.mode === "mult") {
     if (state.config.mult.tables.length * state.config.mult.tables.length < QUESTION_COUNT) {
-      return "Sélectionnez au moins 4 tables pour obtenir 10 calculs différents.";
+      return i18nT("mission.rangeWarning", null, "Sélectionnez au moins 4 tables pour obtenir 10 calculs différents.");
     }
     return null;
   }
@@ -618,7 +698,12 @@ function validateQuestionPool() {
   const size = poolSize();
   if (size < QUESTION_COUNT) {
     const { min, max } = state.config.add;
-    return `La plage ${min} à ${max} ne permet que ${size} calcul${size > 1 ? "s" : ""} différent${size > 1 ? "s" : ""}. Élargissez la plage pour obtenir 10 calculs.`;
+    const fallback = size > 1
+      ? `La plage ${min} à ${max} ne permet que ${size} calculs différents. Élargissez la plage pour obtenir 10 calculs.`
+      : `La plage ${min} à ${max} ne permet qu’un calcul différent. Élargissez la plage pour obtenir 10 calculs.`;
+    return i18nReady()
+      ? i18nPl("mission.rangeTooSmall", size, { min, max }, fallback)
+      : fallback;
   }
   return null;
 }
@@ -712,7 +797,9 @@ function presentQuestion() {
   const answer = document.getElementById("answer");
   const feedback = document.getElementById("feedback");
 
-  document.getElementById("progressText").textContent = `Question ${state.currentIndex + 1} / 10`;
+  document.getElementById("progressText").textContent = i18nReady()
+    ? i18nT("mission.questionProgress", { n: state.currentIndex + 1, total: QUESTION_COUNT })
+    : `Question ${state.currentIndex + 1} / ${QUESTION_COUNT}`;
   document.getElementById("missionProgressBar").style.width = `${((state.currentIndex + 1) / 10) * 100}%`;
   document.getElementById("question").textContent = questionDisplay(q);
   answer.value = "";
@@ -776,7 +863,7 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
   if (isCorrect) {
     // Réponse juste : pas de correction nécessaire, transition brève inchangée.
     // La bonne réponse n'est pas répétée (elle tient lieu du « ? » de l'équation).
-    feedback.textContent = "Bravo !";
+    feedback.textContent = i18nT("mission.correct", null, "Bravo !");
     feedback.className = "feedback correct";
   } else {
     // Réponse incorrecte / temps écoulé : on remplace le « ? » de l'équation par
@@ -784,7 +871,9 @@ function finishQuestion(isCorrect, userAnswer, timedOut = false) {
     // pause pédagogique de QUESTION_CORRECTION_MS ms. Le feedback n'affiche
     // qu'un message court, sans redoubler la réponse.
     questionEl.innerHTML = questionCorrectionHTML(q);
-    feedback.textContent = timedOut ? "Temps écoulé" : "Réponse incorrecte";
+    feedback.textContent = timedOut
+      ? i18nT("mission.timeout", null, "Temps écoulé")
+      : i18nT("mission.incorrect", null, "Réponse incorrecte");
     feedback.className = "feedback incorrect";
   }
 
@@ -815,7 +904,7 @@ function resetRocket() {
   const zone = document.getElementById("rocketZone");
   if (zone) zone.classList.remove("is-launching");
   const count = document.getElementById("rocketPieceCount");
-  if (count) count.textContent = "0 / 10";
+  if (count) count.textContent = i18nT("mission.rocketCount", { count: 0, total: QUESTION_COUNT }, `0 / ${QUESTION_COUNT}`);
   const launchMessage = document.getElementById("launchMessage");
   if (launchMessage) {
     launchMessage.textContent = "";
@@ -831,7 +920,7 @@ function updateRocket(correctCount) {
     void piece.getBoundingClientRect();
     piece.classList.add("piece-pop");
   }
-  document.getElementById("rocketPieceCount").textContent = `${correctCount} / 10`;
+  document.getElementById("rocketPieceCount").textContent = i18nT("mission.rocketCount", { count: correctCount, total: QUESTION_COUNT }, `${correctCount} / ${QUESTION_COUNT}`);
 }
 
 function endMission() {
@@ -861,7 +950,7 @@ function runPerfectLaunch(onComplete) {
   setTimeout(() => {
     message.classList.remove("show");
     void message.getBoundingClientRect();
-    message.textContent = "Décollage !";
+    message.textContent = i18nT("mission.launch", null, "Décollage !");
     message.classList.add("show");
     zone.classList.add("is-launching");
   }, 1050);
@@ -876,7 +965,6 @@ function finalizeMission() {
   // Le temps du classement est la somme des seuls temps de réponse.
   // Les pauses d'affichage Bravo/Faux et le décollage ne sont pas comptés.
   const totalTime = Math.round(state.results.reduce((sum, item) => sum + item.time, 0) * 10) / 10;
-  const message = encouragementFor(state.score);
   const mode = state.config.mode;
   const range = mode === "add"
     ? `${state.config.add.min}–${state.config.add.max}`
@@ -891,16 +979,10 @@ function finalizeMission() {
     range: mode === "add" ? range : ""
   };
 
-  document.getElementById("scoreDisplay").textContent = `${message} Score : ${state.score}/10 — Temps : ${totalTime.toFixed(1)} s`;
-
-  const reward = document.getElementById("missionReward");
-  reward.className = `mission-reward${state.score === 10 ? " perfect" : ""}`;
-  reward.textContent = state.score === 10
-    ? "Fusée complète : décollage réussi !"
-    : `Fusée construite à ${state.score}/10. Encore ${10 - state.score} pièce${10 - state.score > 1 ? "s" : ""} à gagner.`;
-
-  renderDebrief();
-  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
+  // v12.6-B3.1 — l'affichage du rapport (score, fusée, débrief, classement) est
+  // isolé dans renderResultContent() afin d'être régénéré lors d'un changement
+  // de langue sans relancer la mission ni perdre les données déjà saisies.
+  renderResultContent();
   showScreen("resultScreen");
 
   // v12.2 — fin de mission simplifiée.
@@ -929,11 +1011,41 @@ function finalizeMission() {
   }
 }
 
+/**
+ * v12.6-B3.1 — Affiche le rapport de mission (score, récompense fusée, débrief,
+ * classement local) dans la langue courante. Aucune donnée de partie n'est ici
+ * modifiée : cette fonction n'est appelée que pour le rendu.
+ */
+function renderResultContent() {
+  if (!state.finalScore) return;
+  const message = encouragementFor(state.finalScore.score);
+  document.getElementById("scoreDisplay").textContent = i18nT(
+    "result.scoreLine",
+    { message, score: state.finalScore.score, total: QUESTION_COUNT, time: state.finalScore.time.toFixed(1) },
+    `${message} Score : ${state.finalScore.score}/${QUESTION_COUNT} — Temps : ${state.finalScore.time.toFixed(1)} s`
+  );
+
+  const remaining = QUESTION_COUNT - state.finalScore.score;
+  const reward = document.getElementById("missionReward");
+  reward.className = `mission-reward${state.finalScore.score === QUESTION_COUNT ? " perfect" : ""}`;
+  reward.textContent = state.finalScore.score === QUESTION_COUNT
+    ? i18nT("result.rewardPerfect", null, `Fusée complète : décollage réussi !`)
+    : i18nPl(
+        "result.rewardPartial",
+        remaining,
+        { score: state.finalScore.score, total: QUESTION_COUNT, remaining },
+        `Fusée construite à ${state.finalScore.score}/${QUESTION_COUNT}. Encore ${remaining} pièce${remaining > 1 ? "s" : ""} à gagner.`
+      );
+
+  renderDebrief();
+  renderLeaderboard("resultLeaderboardBody", "resultLeaderboardEmpty", state.config.mode);
+}
+
 function encouragementFor(score) {
-  if (score === 10) return "Parfait, mission accomplie !";
-  if (score >= 8) return "Excellent travail !";
-  if (score >= 5) return "Bien joué, continue ainsi !";
-  return "Continue, chaque mission vous fait progresser !";
+  if (score === 10) return i18nT("result.encouragementPerfect", null, "Parfait, mission accomplie !");
+  if (score >= 8) return i18nT("result.encouragementGreat", null, "Excellent travail !");
+  if (score >= 5) return i18nT("result.encouragementGood", null, "Bien joué, continue ainsi !");
+  return i18nT("result.encouragementContinue", null, "Continue, chaque mission vous fait progresser !");
 }
 
 function renderDebrief() {
@@ -953,7 +1065,7 @@ function renderDebrief() {
 
     const status = document.createElement("td");
     status.className = item.correct ? "status-ok" : "status-wrong";
-    status.textContent = item.correct ? "Juste" : "Faux";
+    status.textContent = item.correct ? i18nT("feedback.correct", null, "Juste") : i18nT("feedback.incorrect", null, "Faux");
 
     const time = document.createElement("td");
     time.className = "time-cell";
@@ -991,7 +1103,7 @@ async function saveConnectedResult() {
   if (statusEl) {
     statusEl.hidden = false;
     statusEl.className = "inline-message save-status is-busy";
-    statusEl.textContent = "Enregistrement de votre score…";
+    statusEl.textContent = i18nT("result.saveStatusPending", null, "Enregistrement de votre score…");
   }
 
   let res = null;
@@ -1030,7 +1142,7 @@ async function saveConnectedResult() {
     if (statusEl) {
       statusEl.hidden = false;
       statusEl.className = "inline-message save-status is-success";
-      statusEl.textContent = "Score enregistré sur votre compte.";
+      statusEl.textContent = i18nT("result.saveStatusSuccess", null, "Score enregistré sur votre compte.");
     }
     return true;
   }
@@ -1041,12 +1153,12 @@ async function saveConnectedResult() {
     statusEl.className = "inline-message save-status is-error";
     statusEl.innerHTML = "";
     statusEl.appendChild(document.createTextNode(
-      "Impossible d\u2019enregistrer le score sur votre compte."
+      i18nT("result.saveStatusError", null, "Impossible d\u2019enregistrer le score sur votre compte.")
     ));
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "retry-save-btn";
-    retry.textContent = "Réessayer";
+    retry.textContent = i18nT("result.retry", null, "Réessayer");
     retry.addEventListener("click", () => {
       state.finalSavePromise = saveConnectedResult();
     });
@@ -1119,7 +1231,7 @@ async function saveCurrentScoreOnce() {
   const input = document.getElementById("playerName");
   const name = input.value.trim();
   if (!name) {
-    document.getElementById("nameWarning").textContent = "Saisissez le prénom avant d’enregistrer le résultat.";
+    document.getElementById("nameWarning").textContent = i18nT("result.saveNameRequired", null, "Saisissez le prénom avant d’enregistrer le résultat.");
     input.focus();
     return false;
   }
@@ -1171,7 +1283,11 @@ function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
     ? document.getElementById("resultLeaderboardDetailHeader")
     : document.getElementById("leaderboardDetailHeader");
   if (detailHeader) {
-    detailHeader.textContent = mode === "add" ? "Plage utilisée" : "Tables utilisées";
+    detailHeader.textContent = i18nT(
+      mode === "add" ? "leaderboard.columnDetailAdd" : "leaderboard.columnDetailMult",
+      null,
+      mode === "add" ? "Plage utilisée" : "Tables utilisées"
+    );
   }
 
   if (scores.length === 0) {
@@ -1206,14 +1322,14 @@ function renderLeaderboard(tbodyId, emptyStateId, mode = "mult") {
     holeCell.className = "hole-cell";
     const mixedOrHole = entry.questionType === "hole" || entry.questionType === "mixed";
     if (mixedOrHole) {
-      holeCell.textContent = "Oui";
-      const tooltipLabel = (QUESTION_TYPES[entry.questionType] || {}).label || entry.questionType;
+      holeCell.textContent = i18nT("leaderboard.yes", null, "Oui");
+      const tooltipLabel = questionTypeLabel(entry.questionType);
       holeCell.setAttribute(
         "data-tooltip",
-        `Mode : ${tooltipLabel}`
+        i18nT("leaderboard.holeMode", { mode: tooltipLabel }, `Mode : ${tooltipLabel}`)
       );
     } else {
-      holeCell.textContent = "Non";
+      holeCell.textContent = i18nT("leaderboard.no", null, "Non");
     }
 
     const detail = document.createElement("td");
@@ -1432,11 +1548,15 @@ function switchLeaderboardMode(mode) {
   activateLeaderboardTab(mode);
   const headline = document.getElementById("leaderboardHeadline");
   if (headline) {
-    headline.textContent = `Top 20 — ${modeLabel(mode)}`;
+    headline.textContent = i18nT("leaderboard.headline", { mode: modeLabel(mode) }, `Top 20 — ${modeLabel(mode)}`);
   }
   const detailHeader = document.getElementById("leaderboardDetailHeader");
   if (detailHeader) {
-    detailHeader.textContent = mode === "add" ? "Plage utilisée" : "Tables utilisées";
+    detailHeader.textContent = i18nT(
+      mode === "add" ? "leaderboard.columnDetailAdd" : "leaderboard.columnDetailMult",
+      null,
+      mode === "add" ? "Plage utilisée" : "Tables utilisées"
+    );
   }
   renderLeaderboard("leaderboardBody", "leaderboardEmpty", mode);
 }

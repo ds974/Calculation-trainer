@@ -53,6 +53,9 @@ final class TestRunner
         $this->testUnauthenticatedAccess();
         $this->testEmailMigration();
 
+        // v12.6-C1 : préférence linguistique des comptes (SQLite + API).
+        $this->testPreferredLanguage();
+
         // Étape 3 : enregistrement des résultats et historique (l'import invité a
         // été retiré en v12.2 — plus de route serveur, plus de méthode importGuest).
         $this->testResultSave();
@@ -917,6 +920,120 @@ final class TestRunner
             $this->check($row2 !== false && $row2['email'] === null, 'Migration ré-exécutable sans erreur (idempotente)');
         } catch (Throwable $e) {
             $this->check(false, "Migration e-mails : {$e->getMessage()}");
+        }
+    }
+
+    // --- v12.6-C1 : préférence linguistique des comptes (SQLite + API) ---
+
+    private function testPreferredLanguage(): void
+    {
+        echo "[Préférence linguistique (v12.6-C1)]\n";
+        try {
+            if (session_status() !== PHP_SESSION_ACTIVE) {
+                @session_start();
+            }
+            $_SESSION = [];
+
+            $root = sys_get_temp_dir() . '/calc_trainer_lang_' . getmypid();
+            @mkdir($root, 0777, true);
+
+            // 1) Nouvelle installation : la colonne existe avec défaut 'fr'.
+            $db = new Database($root);
+            $pdo = $db->pdo();
+            $cols = array_column($pdo->query("PRAGMA table_info(users)")->fetchAll(), 'name');
+            $this->check(in_array('preferred_language', $cols, true), 'Colonne preferred_language présente dans le schéma');
+            $defaultRow = $pdo->query("SELECT dflt_value FROM pragma_table_info('users') WHERE name='preferred_language'")->fetchColumn();
+            $this->check($defaultRow === "'fr'", 'Valeur par défaut de preferred_language = fr');
+
+            // 2) Migration idempotente : un second Database sur la même base ne
+            //    provoque aucune erreur et ne duplique aucune colonne.
+            $db2 = new Database($root);
+            $cols2 = array_column($db2->pdo()->query("PRAGMA table_info(users)")->fetchAll(), 'name');
+            $this->check(
+                count(array_keys($cols2, 'preferred_language', true)) === 1,
+                'Migration ré-exécutable sans erreur (idempotente)'
+            );
+
+            $repo = new UserRepository($pdo);
+            $auth = new AuthService($pdo, $repo);
+
+            // 3) Inscription sans langue => 'fr'.
+            $u1 = $auth->register(['login' => 'l_fr', 'password' => 'unMotDePasseSûr123']);
+            $this->check(($u1['preferred_language'] ?? '') === 'fr', 'Inscription sans langue => fr');
+
+            // 4) Inscription avec es puis zh-Hans => persistées.
+            $u2 = $auth->register([
+                'login' => 'l_es', 'password' => 'unMotDePasseSûr456',
+                'preferred_language' => 'es',
+            ]);
+            $this->check(($u2['preferred_language'] ?? '') === 'es', 'Inscription avec es => es');
+            $u3 = $auth->register([
+                'login' => 'l_zh', 'password' => 'unMotDePasseSûr789',
+                'preferred_language' => 'zh-Hans',
+            ]);
+            $this->check(($u3['preferred_language'] ?? '') === 'zh-Hans', 'Inscription avec zh-Hans => zh-Hans');
+
+            // 5) Langue non autorisée rejetée.
+            try {
+                $auth->register([
+                    'login' => 'l_bad', 'password' => 'unMotDePasseSûr000',
+                    'preferred_language' => 'en-US',
+                ]);
+                $this->check(false, 'Inscription avec langue non autorisée (en-US) refusée');
+            } catch (InvalidArgumentException) {
+                $this->check(true, 'Inscription avec langue non autorisée (en-US) refusée');
+            }
+
+            // 6) Connexion renvoyant la langue enregistrée.
+            $logged = $auth->login('l_es', 'unMotDePasseSûr456');
+            $this->check(($logged['preferred_language'] ?? '') === 'es', 'Connexion renvoie la langue enregistrée (es)');
+
+            // 7) changement de langue : fr->en puis persistance.
+            $frId = (int)$u1['id'];
+            $updated = $auth->changeLanguage($frId, 'en');
+            $this->check(($updated['preferred_language'] ?? '') === 'en', 'changeLanguage fr->en renvoie en');
+            $persisted = (new UserRepository($pdo))->findById($frId);
+            $this->check(
+                ($persisted['preferred_language'] ?? '') === 'en',
+                'La langue en est bien persistée en base'
+            );
+
+            // 8) changeLanguage vers une valeur invalide => rejetée, valeur intacte.
+            try {
+                $auth->changeLanguage($frId, 'de');
+                $this->check(false, 'changeLanguage avec langue non autorisée refusée');
+            } catch (InvalidArgumentException) {
+                $this->check(
+                    ((new UserRepository($pdo))->findById($frId)['preferred_language'] ?? '') === 'en',
+                    'Valeur invalide refusée : la langue précédente (en) reste intacte'
+                );
+            }
+
+            // 9) Une modification de langue n'altère ni rôle, ni statut, ni scores.
+            $auth2 = new AuthService($pdo, new UserRepository($pdo));
+            $u = $auth2->register(['login' => 'l_guard', 'password' => 'unMotDePasseSûr321']);
+            $uid = (int)$u['id'];
+            $repo2 = new UserRepository($pdo);
+            $roleBefore = (string)$repo2->findById($uid)['role'];
+            $activeBefore = (int)$repo2->findById($uid)['is_active'];
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $results->save($uid, 'multiplication', 8);
+            $auth2->changeLanguage($uid, 'zh-Hans');
+            $after = $repo2->findById($uid);
+            $this->check(
+                (string)$after['role'] === $roleBefore && (int)$after['is_active'] === $activeBefore,
+                'Rôle et statut inchangés après changement de langue'
+            );
+            $this->check(
+                (int)$pdo->query("SELECT COUNT(*) FROM results WHERE user_id = {$uid}")->fetchColumn() === 1,
+                'Scores et historiques conservés après changement de langue'
+            );
+
+            // 10) La réponse publique n'expose aucune donnée sensible.
+            $this->check(!isset($updated['password_hash']), 'Changement de langue : aucune empreinte exposée');
+            $this->check(!array_key_exists('email', $updated), 'Changement de langue : réponse sans e-mail');
+        } catch (Throwable $e) {
+            $this->check(false, "Préférence linguistique : {$e->getMessage()}");
         }
     }
 

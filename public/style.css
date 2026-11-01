@@ -996,6 +996,93 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
   .app-nav-bar .account-chip { padding: 8px 10px; gap: 8px; }
 }
 
+/* ==========================================================================
+   Sélecteur de langue (v12.6-B2)
+   ========================================================================== */
+
+/* Positionné en haut à droite dans la barre de navigation sticky. La barre est
+   disponible même sans compte connecté ; elle est masquée pendant une mission
+   (classe .is-hidden) — le sélecteur l'est donc aussi, ce qui préserve le jeu. */
+.lang-selector {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  z-index: 45;
+}
+
+.lang-selector__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: .9rem;
+  font-weight: 750;
+  line-height: 1;
+  color: var(--secondary);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--soft-shadow);
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.lang-selector__trigger:hover { background: #e9efef; }
+.lang-selector__trigger:focus-visible {
+  outline: 3px solid var(--primary-light);
+  outline-offset: 2px;
+}
+.lang-selector__caret {
+  font-size: .72rem;
+  opacity: .7;
+}
+
+.lang-selector__list {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  min-width: 160px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--soft-shadow);
+  z-index: 50;
+}
+.lang-selector.is-open .lang-selector__list { display: block; }
+
+.lang-selector__list [role="option"] {
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .95rem;
+  font-weight: 650;
+  color: var(--text);
+}
+.lang-selector__list [role="option"]:hover,
+.lang-selector__list [role="option"]:focus {
+  background: #e9efef;
+  outline: none;
+}
+.lang-selector__list [role="option"].is-active {
+  background: var(--primary);
+  color: #fff;
+}
+.lang-selector__list [role="option"].is-active::before {
+  content: "✓ ";
+}
+
+@media (max-width: 560px) {
+  .lang-selector { right: 8px; }
+  .lang-selector__trigger { padding: 7px 10px; font-size: .84rem; }
+}
+
+
 
 
 /* Écrans connectés/inscription/profil */

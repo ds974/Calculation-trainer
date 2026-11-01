@@ -111,4 +111,29 @@ final class Validator
     {
         return is_int($score) && $score >= 0 && $score <= 10;
     }
+
+    /**
+     * Codes linguistiques canorisés acceptés par l'application (v12.6-C1).
+     *
+     * Une préférence linguistique ne peut être qu'une de ces valeurs exactes.
+     * De simples codes régionaux tels que `en-US` ou `zh-CN` sont rigoureusement
+     * refusés : c'est au client de normaliser les préférences du navigateur vers
+     * ces codes canoniques avant transmission.
+     *
+     * @return true si le code est valide.
+     */
+    public static function language(string $language): bool
+    {
+        return in_array($language, ['fr', 'en', 'es', 'zh-Hans'], true);
+    }
+
+    /**
+     * Renvoie la liste des codes linguistiques canorisés autorisés.
+     *
+     * @return string[]
+     */
+    public static function allowedLanguages(): array
+    {
+        return ['fr', 'en', 'es', 'zh-Hans'];
+    }
 }

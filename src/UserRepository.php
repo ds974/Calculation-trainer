@@ -44,7 +44,8 @@ final class UserRepository
     /**
      * Crée un nouvel utilisateur.
      *
-     * @param array<string,mixed> $data login, password (clair), role.
+     * @param array<string,mixed> $data login, password (clair), role,
+     *        et éventuellement preferred_language (défaut 'fr').
      *        L'e-mail n'est plus géré : la colonne `email` reste à NULL.
      * @return int l'identifiant du nouvel utilisateur.
      * @throws RuntimeException si le login est déjà pris.
@@ -60,14 +61,19 @@ final class UserRepository
 
         $hash = password_hash((string)$data['password'], PASSWORD_ARGON2ID);
 
+        // La préférence linguistique est optionnelle : on retombe sur 'fr' pour
+        // les anciens clients qui ne la transmettent pas.
+        $preferredLanguage = (string)($data['preferred_language'] ?? 'fr');
+
         $stmt = $this->pdo->prepare(
-            'INSERT INTO users (login, email, password_hash, role)
-             VALUES (:login, NULL, :hash, :role)'
+            'INSERT INTO users (login, email, password_hash, role, preferred_language)
+             VALUES (:login, NULL, :hash, :role, :preferred_language)'
         );
         $stmt->execute([
-            'login' => (string)$data['login'],
-            'hash'  => $hash,
-            'role'  => (string)($data['role'] ?? 'user'),
+            'login'              => (string)$data['login'],
+            'hash'               => $hash,
+            'role'               => (string)($data['role'] ?? 'user'),
+            'preferred_language' => $preferredLanguage,
         ]);
 
         return (int)$this->pdo->lastInsertId();
@@ -178,5 +184,20 @@ final class UserRepository
             'UPDATE users SET last_login_at = strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\') WHERE id = :id'
         );
         $stmt->execute(['id' => $userId]);
+    }
+
+    /**
+     * Met à jour la préférence linguistique d'un utilisateur (v12.6-C1).
+     *
+     * Ne modifie que la langue : le rôle, le statut, le mot de passe, les
+     * statistiques et les historiques restent strictement inchangés.
+     * Le code linguistique doit avoir été validé en amont (Validator::language).
+     */
+    public function updatePreferredLanguage(int $userId, string $language): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE users SET preferred_language = :language WHERE id = :id'
+        );
+        $stmt->execute(['language' => $language, 'id' => $userId]);
     }
 }

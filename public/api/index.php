@@ -16,6 +16,7 @@ declare(strict_types=1);
  *  - auth/logout           (POST) : déconnexion (destruction de la session).
  *  - profile               (GET)  : profil de l'utilisateur connecté.
  *  - profile/password      (POST) : modification du mot de passe.
+ *  - profile/language      (POST) : modification de la préférence linguistique.
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
  *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
@@ -95,11 +96,18 @@ try {
 
         case 'auth/register':
             Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
-            $user = $auth->register([
+            // Les données d'inscription ; la langue préférée est OPTIONNELLE.
+            // On ne l'ajoute au tableau que si le client la transmet réellement :
+            // la clé absente laisse AuthService choisir la valeur par défaut 'fr'
+            // (un null explicite serait interprété comme une valeur invalide).
+            $reg = [
                 'login'    => (string)($parsed['login'] ?? ''),
                 'password' => (string)($parsed['password'] ?? ''),
-                // Le champ 'email' d'un ancien client est volontairement ignoré.
-            ]);
+            ];
+            if (isset($parsed['preferred_language'])) {
+                $reg['preferred_language'] = (string)$parsed['preferred_language'];
+            }
+            $user = $auth->register($reg);
             Response::success(['user' => $user], 201);
             break;
 
@@ -138,6 +146,24 @@ try {
                 (string)($parsed['new_password'] ?? '')
             );
             Response::success(['password_changed' => true]);
+            break;
+
+        case 'profile/language':
+            // Modification de la préférence linguistique de l'utilisateur connecté
+            // (v12.6-C1). Seul le compte de la session est modifiable ; la langue
+            // est validée de manière stricte et n'affecte aucune autre donnée.
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            // La langue doit être fournie et valide (fr/en/es/zh-Hans). Une valeur
+            // absente ou invalide est rejetée par AuthService::changeLanguage (400).
+            $user = $auth->changeLanguage(
+                (int)$user['id'],
+                (string)($parsed['preferred_language'] ?? '')
+            );
+            Response::success(['user' => $user]);
             break;
 
         case 'result/save':

@@ -1,139 +1,209 @@
-# Mission Calcul Mental — Version 12.5 (comptes, statistiques, administration, questions à trou, difficultés personnelles, entraînement adaptatif)
+# Mental Math Mission — Adaptive Arithmetic Training
 
-Application pédagogique de calcul mental (multiplications et additions), 10 questions
-par mission, chronomètre et animation de fusée.
+*Mission Calcul Mental* (original French name) — an open-source, multilingual mental
+arithmetic training application with adaptive practice, progress tracking and personalized
+learning.
 
-La **v12** ajoute une gestion de comptes utilisateurs, un historique des résultats,
-des statistiques et une interface d'administration, reposant sur un backend **PHP 8.2+**
-et une base **SQLite**, tout en conservant intégralement les fonctionnalités de la **v11**
-(mode invité, classements locaux Top 20, paramètres, fusée, etc.).
-
-La **v12.3** ajoute le **type de questions** (classique, à trou, ou mélange) : une question
-à trou masque le 1er ou le 2e opérande (`? × 6 = 18`), le mode **Mélange** alterne aléatoirement
-questions classiques et à trou, et le type de questions est persisté (localStorage + SQLite)
-puis affiché dans le classement (« À trou »).
-
-La **v12.3** améliore aussi le **retour pédagogique** après une réponse incorrecte ou un temps
-écoulé : la bonne réponse est révélée **dans l'équation** à l'emplacement exact du « ? »
-(`3 × 6 = 18` avec le *18* en rouge, `? × 6 = 18` → `3 × 6 = 18`, etc.), le chronomètre est
-arrêté, la saisie est verrouillée et la correction reste affichée **4 secondes** avant de
-passer à la question suivante. La transition reste brève (700 ms) après une bonne réponse.
-
-La **v12.4** introduit une **mémoire personnelle des difficultés**, par utilisateur et par
-opération, pour guider l'enfant vers ses points à travailler. Elle fonctionne pour les
-addition et multiplication, en classique comme à trou, sans rien changer au générateur de
-questions ni au fonctionnement des invités.
-
-La **v12.5** exploite cette mémoire pour l'**entraînement adaptatif** : une option
-« **M'entraîner sur mes difficultés** », activée par défaut et désactivable, cible
-précisément les points faibles détectés par la v12.4. Environ **40 % des questions** sont
-tirées des opérations les plus difficiles (coeff de difficulté le plus élevé d'abord), les
-60 % restants restant ordinaires. Une nouvelle API `difficulty/operations` fournit les
-opérations classées, chargées au lancement de chaque mission. La répartition 5
-classiques / 5 à trou est conservée en mode Mélange, et tout revient à un comportement
-normal pour les invités ou en l'absence de difficultés compatibles.
+English | [Français](README.fr.md)
 
 ---
 
-## Architecture (étape 1 — backend PHP + SQLite)
+## Available languages
 
-```text
-calculation-trainer/
-├── public/                     # Racine documentaire (SEULE zone exposée par HTTP)
-│   ├── index.html              # Application monopage (jeu v11, SPA)
-│   ├── style.css               # Thème spatial, SVG & animations
-│   ├── app.js                  # Logique du jeu (chargé après guest-history.js)
-│   ├── adaptive-generator.js   # Générateur adaptatif v12.5 (40 % de questions ciblées)
-│   ├── guest-history.js        # Historique & import invité v12
-│   ├── account.js              # Interface compte : connexion, inscription, profil, import
-│   └── api/index.php           # Front controller des API (auth + résultats)
-├── src/                        # NON accessible par HTTP
-│   ├── bootstrap.php           # Constantes de chemins + autoload léger
-│   ├── Database.php            # Connexion PDO SQLite (WAL, FK, busy_timeout)
-│   ├── Response.php            # Réponses JSON structurées
-│   └── UserRepository.php      # Accès table users (hachage Argon2id)
-├── storage/                    # NON accessible par HTTP
-│   └── calculation-trainer.sqlite
-├── scripts/
-│   └── initialize.php          # Init base + 1er admin (saisie sécurisée)
-├── tests/
-│   └── run.php                 # Tests CLI (base temporaire, sans dépendance)
-├── .gitignore
-└── README.md
-```
+The application interface is fully translated into **four languages**:
 
-> Le répertoire `public/` doit être la racine documentaire du serveur Web. Tout ce qui
-> se trouve hors de `public/` (`src/`, `storage/`, `scripts/`, `tests/`, `.gitignore`)
-> ne doit jamais être servi par HTTP.
+- French
+- English
+- Spanish
+- Simplified Chinese
+
+The language can be changed at any time from a discreet menu at the top of the interface:
+
+- **Visitors** can keep their language preference **locally** (in the browser).
+- **Signed-in users** get their language preference **saved in their account**, so it is
+  restored on every device/session.
+- The pedagogical interfaces (missions, corrections, results), personal statistics, and the
+  administration dashboard are fully translated.
+
+> Language selection is the major evolution of **v12.6**. Whenever the language is changed,
+> the majority of screens update immediately, without reloading the page. The four translation
+> catalogs each contain 357 identical keys, so the coverage is consistent across languages.
 
 ---
 
-## Prérequis
+## Overview
 
-- **PHP 8.2 minimum** (recommandé : 8.3/8.4 stable).
-- Extensions : `pdo_sqlite`, `sqlite3`, algorithme **Argon2id** (`PASSWORD_ARGON2ID`),
-  `session`, `json`, `date`. Ces extensions sont incluses par défaut dans le binaire PHP
-  standard (macOS via Homebrew et hébergeurs PHP classiques).
-- PHP doit pouvoir écrire dans `storage/`.
+**Mental Math Mission** is a browser-based application designed to help children and learners
+practice **mental calculations** — additions and multiplications — through short, timed
+missions.
 
-### Vérifier les prérequis
+- **Pedagogical goal:** build lasting arithmetic fluency through regular, focused practice.
+- **Who it helps:** learners who want to strengthen their tables and addition skills, parents
+  and teachers looking for a simple daily practice tool, and anyone who enjoys a quick mental
+  math challenge.
+- **How it runs:** a single-page application served from a web browser. No app installation,
+  no separate frontend build step.
+
+The application does not claim any official scientific or institutional validation; it is a
+teaching aid whose effectiveness rests on gradual, personalized practice and feedback.
+
+---
+
+## Key features
+
+- **Addition and multiplication practice**, with independent settings for each operation.
+- **Classic, missing-number and mixed questions** (e.g. `? × 6 = 18`), selectable per mission.
+- **Configurable multiplication tables and addition ranges.**
+- **Timed 10-question missions** with a circular timer.
+- **Interactive rocket-building reward** at the end of each mission.
+- **Adaptive practice** focused on each learner's difficult operations.
+- **Personalized difficulty tracking** per operation and per user.
+- **Scores, history and progress statistics**, including charts and per-table difficulty.
+- **Optional user accounts** with secure sessions and isolated data.
+- **Guest mode** for immediate play without an account.
+- **Administrative dashboard** for managing accounts and monitoring activity.
+- **Four interface languages** (French, English, Spanish, Simplified Chinese).
+- **Responsive interface** adapting to narrow screens, including a touch keypad.
+
+### About adaptive practice
+
+When the option to train on personal difficulties is enabled, up to **40 %** of the questions in
+a mission target operations already identified as difficult, while the remaining **60 %** come
+from ordinary practice. Everything still respects the configured parameters (selected tables /
+ranges, and the Classic, Missing-number or Mixed question types). If no compatible difficulties
+exist, the mission simply returns to ordinary questions — a guest behaves exactly like a normal
+learner.
+
+---
+
+## How it works
+
+1. **Choose the type of arithmetic** — additions, multiplications, or both.
+2. **Configure a mission** — select tables or ranges, the question type, and preferences.
+3. **Solve ten timed questions** — gentle pacing with immediate feedback.
+4. **Review results and corrections** — a debriefing reveals the right answer inside each
+   equation and explains the reasoning.
+5. **Track progress and practice difficult operations** — review graphs and statistics, then
+   let adaptive practice target your weaker points.
+
+---
+
+## Installation and requirements
+
+### Requirements
+
+- **PHP 8.2 or newer** (8.3/8.4 recommended).
+- PHP extensions: `pdo_sqlite`, `sqlite3`, **Argon2id** (`PASSWORD_ARGON2ID`), `session`,
+  `json`, `date`. These are enabled by default in the standard PHP binary (macOS via
+  Homebrew and on classic PHP hosts).
+- PHP must be able to **write to `storage/`** (SQLite database location).
+- A local web server or any compatible PHP deployment.
+
+### Verify the requirements
 
 ```bash
 php -v
 php -m | grep -iE 'pdo_sqlite|sqlite3|sodium|session|json|date'
 php -r 'var_dump(in_array(PASSWORD_ARGON2ID, password_algos(), true));'
-# doit afficher : bool(true)
+# should print: bool(true)
 ```
 
----
-
-## Initialisation de la base et du premier administrateur
-
-Crée le schéma SQLite (tables `users`, `results`, index) et le compte administrateur
-initial si absent. Le mot de passe est **saisi interactivement** (masqué), jamais codé
-en dur ni stocké en clair.
+### Initialize the database and the first administrator
 
 ```bash
 php scripts/initialize.php
 ```
 
-- Login : `admin` · Rôle : `admin`.
-- Le mot de passe saisi doit comporter **au moins 10 caractères**.
-- Le script **refuse** de recréer ou d'écraser un administrateur déjà existant.
-- Si le mode **WAL** ne peut pas être activé, le script le **signale explicitement**
-  (sans masquer le problème) tout en continuant.
+- Login: `admin` — Role: `admin`.
+- The password is **entered interactively** (hidden) and must be **at least 10 characters**.
+- The script **refuses** to recreate or overwrite an existing administrator.
+- It creates the SQLite schema (tables `users`, `results`, plus difficulty and logging tables)
+  and applies the migrations automatically. If the WAL mode cannot be enabled, the script says
+  so explicitly while continuing.
+
+### Run locally (development server)
+
+```bash
+php -S localhost:8000 -t public
+```
+
+The document root is `public/`; the application is then available at
+`http://localhost:8000/`.
+
+> The `public/` directory must be the web server's document root. Everything outside it
+> (`src/`, `storage/`, `scripts/`, `tests/`) must never be served over HTTP.
+---
+
+## User accounts and data
+
+- **Guest mode:** play immediately without an account. Results are stored locally (browser
+  storage) and can be imported into an account later.
+- **Optional accounts:** register with a unique identifier (3–40 alphanumeric characters and
+  underscores) and a password of **at least 10 characters**. No e-mail address is required.
+- **Results and difficulty tracking:** when signed in, each mission's results and per-operation
+  difficulties are saved to the account and used by adaptive practice and statistics.
+- **Language preference:** saved per account and synchronized between the local and the
+  account preference (endpoint `profile/language`).
+- Passwords are hashed with Argon2id and never stored in plain text; sessions and CSRF
+  protection follow good security practices (HTTP-only cookies, same-site policy, per-session
+  tokens).
+
+The application aims to follow good security practices, but it does **not** claim formal GDPR or
+security certification.
 
 ---
 
-## Tests
+## Technical architecture
+
+- **Frontend:** native JavaScript single-page application (no framework), with an SVG/CSS
+  space theme.
+- **Backend:** PHP, with a JSON API as a front controller (`public/api/index.php`).
+- **Database:** SQLite, via PDO with prepared statements.
+- **Internationalization:** per-language JSON catalogs (`public/i18n/`) driven by a small
+  `i18n.js` engine — the only source of translated text.
+
+```
+public/     document root (the only HTTP-exposed area)
+  index.html, style.css, app.js, admin.js, account.js, stats.js, i18n.js, i18n/
+  api/index.php
+src/        backend (not exposed)
+storage/    SQLite database (not exposed)
+scripts/    CLI tools (e.g. initialize.php, not exposed)
+tests/      test suites (not exposed)
+```
+
+---
+
+## Testing
+
+The tests run against a **temporary SQLite database** (under `/tmp`) and never touch the
+production database.
+
+### PHP (backend + HTTP)
 
 ```bash
 php tests/run.php
-```
-
-Les tests s'exécutent sur une **base SQLite temporaire** (sous `/tmp`) et ne touchent
-pas à la base de production. Ils vérifient : PRAGMA (FK, busy_timeout, WAL), création du
-schéma, unicité des logins (insensible à la casse), hachage/vérification Argon2id, et
-refus de recréer un administrateur existant. Un test n'est déclaré **réussi** que s'il a
-été réellement exécuté sans erreur.
-
-Le flux **API HTTP** de bout en bout (server intégré sur un port libre, sessions, CSRF,
-résultats/classement) se teste séparément, toujours sur une base jetable :
-
-```bash
 php tests/http_test.php
+php tests/difficulty_melange_repro.php
 ```
 
-Les **tests JavaScript** (via JavaScript for Automation, sans Node) valident côté client la
-normalisation des dates (historique invité), le **retour pédagogique** de la v12.3
-(révélation de la bonne réponse dans l'équation, durée de correction de 4 s, absence de
-double affichage et verrouillage de la saisie) et le **classement des difficultés** de la
-v12.4 (trie des tables par difficulté décroissante, puis statut et numéro, sans modifier
-la liste source) et le **générateur adaptatif** de la v12.5 (sélection des 40 % ciblés,
-priorité aux coefficients les plus élevés, retour à la fréquence ordinaire, respect des
-types et de la répartition Mélange) :
+`php tests/run.php` covers the schema, authentication (Argon2id), login unicity, difficulty
+migration and the "last active administrator" protection. `php tests/http_test.php` exercises
+the full JSON HTTP flow (embedded server on a free port, sessions, CSRF, results, admin) and
+the `profile/language` preference endpoint.
+
+### JavaScript (frontend)
+
+The frontend tests use **JavaScript for Automation (JXA)** — the built-in AppleScript/JavaScript
+bridge on macOS **without Node.js**:
 
 ```bash
+osascript -l JavaScript tests/js_i18n_test.js
+osascript -l JavaScript tests/js_i18n_app_test.js
+osascript -l JavaScript tests/js_i18n_account_test.js
+osascript -l JavaScript tests/js_i18n_stats_test.js
+osascript -l JavaScript tests/js_i18n_admin_test.js
+osascript -l JavaScript tests/js_i18n_preference_test.js
 osascript -l JavaScript tests/js_normalization_test.js
 osascript -l JavaScript tests/js_correction_test.js
 osascript -l JavaScript tests/js_difficulty_ui_test.js
@@ -141,372 +211,27 @@ osascript -l JavaScript tests/js_adaptive_generator_test.js
 osascript -l JavaScript tests/js_adaptive_integration_test.js
 ```
 
----
-
-## Démarrage local (serveur de développement)
-
-```bash
-php -S localhost:8000 -t public
-```
-
-La racine documentaire est `public/` ; l'application est ensuite accessible sur
-`http://localhost:8000/`.
+> The JavaScript tests currently rely on JXA, which is macOS-only. They exercise the pure
+> application logic (i18n engine, catalogs, corrections, difficulty ranking, adaptive
+> generator, language preference handling); DOM rendering and real asynchronous/network
+> behaviour are validated manually in a browser (e.g. Firefox).
 
 ---
 
-## Sécurité — durcissement appliqué et prérequis d'environnement
+## Project status and version
 
-### Protections applicatives (présentes et vérifiées par les tests)
-
-- **Session sécurisée** : cookie `HttpOnly`, `SameSite=Lax`, `Secure` si HTTPS, nom dédié,
-  régénération de l'identifiant après connexion (`session_regenerate_id`).
-- **CSRF** : jeton unique par session, obligatoire pour toute opération POST.
-- **Authentification** : Argon2id, messages génériques, comptes isolés (chaque utilisateur
-  n'accède qu'à ses propres données), limitation des tentatives de connexion (anti brute-force).
-- **Injections SQL** : 100 % requêtes préparées PDO (aucune concaténation).
-- **XSS** : aucune donnée utilisateur injectée en HTML sans échappement ; en-tête
-  `Content-Security-Policy: default-src 'self'` (script/style/connect auto-hébergés uniquement).
-- **En-têtes de sécurité** : `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
-  `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, `Permissions-Policy`.
-- **Exposition** : `src/`, `storage/`, `scripts/` et `tests/` sont hors racine documentaire.
-
-### Prérequis de configuration (php.ini / MAMP) — à appliquer côté environnement
-
-Certaines directives du moteur de session PHP sont figées au démarrage du module et ne
-peuvent pas être modifiées par le code applicatif (un `ini_set()` est un no-op). Elles
-doivent être verrouillées dans le `php.ini` utilisé (MAMP) :
-
-```ini
-; Anti-fixation de session : refuse les identifiants de session non initialisés.
-session.use_strict_mode = 1
-; L'identifiant de session ne transite jamais par l'URL.
-session.use_only_cookies = 1
-; Garde le handler natif : ne JAMAIS basculer session.serialize_handler.
-session.serialize_handler = php
-; Désactive le suivi de progression des téléversements dans les sessions
-; (réduit la surface CVE-2026-109618 / CVE-2026-109619).
-session.upload_progress.enabled = 0
-```
-
-> Les en-têtes de sécurité (dont la CSP), posés par `src/Security.php` sur les réponses
-> API, ne couvrent **pas** la page statique `index.html` servie par Apache. Pour durcir
-> aussi la SPA, un `public/.htaccess` est fourni (utile si `AllowOverride` est activé) ;
-> sinon, ajoutez les mêmes en-têtes au niveau du vhost. En mode développement
-> (`php -S localhost:8000 -t public`), seules les réponses API portent ces en-têtes.
-
-### Vulnérabilités du moteur PHP (nécessitent une mise à jour de PHP)
-
-Les CVEs **CVE-2026-109618**, **CVE-2026-109619** et **CVE-2026-115560** concernent le
-moteur PHP lui-même (PHP < 8.5.12). Elles ne peuvent pas être entièrement corrigées par du
-code applicatif. Le code actuel **n'aggrave pas** la situation : il ne reconfigure jamais
-`session.serialize_handler`, n'appelle aucun `unserialize()` sur des données non fiables et
-ne gère pas de téléversements. **La mise à jour du serveur PHP vers 8.5.12 (ou ultérieur)
-reste une exigence distincte avant toute exposition publique**, dans l'esprit de l'étape 5.
+**v12.6.0** is the version prepared for publication on this branch. It adds the four-language
+internationalization, per-account language preference synchronization, and the supporting
+i18n engine, catalogs and tests — on top of the v12.5 adaptive training.
 
 ---
 
-## Étape 3 — Résultats, historique et mode invité
+## License and attribution
 
-### Enregistrement des parties (utilisateurs connectés)
+Author: **Didier SEBASTIEN**
 
-- Table `results` étendue : colonne `guest_id` (nullable) + index UNIQUE partiel
-  `(user_id, guest_id)` afin de garantir l'**idempotence** de l'import invité
-  (un même `guest_id` ne peut exister qu'une fois par utilisateur). Migration
-  automatique et idempotente à la connexion de la base.
-- `src/ResultRepository.php` : accès PDO préparé à la table `results`.
-- `src/ResultService.php` : logique métier — `save()`, `history()`, `importGuest()`.
-  Validation côté serveur (mode, score sur 10, horodatage UTC), transaction SQLite
-  pour l'import, refus des données malformées sans écriture partielle.
-- Nouvelles routes API (toutes soumises à session + CSRF pour les POST) :
-  - `result/save`    (POST) : enregistre une partie terminée (mode, score, played_at,
-    `question_type` — `classic` | `hole` | `mixed`, défaut `classic`).
-  - `result/history` (GET)  : historique de l'utilisateur connecté.
-- **Limite de confiance** : le score est transmis par le navigateur ; il ne peut pas
-  être vérifié côté serveur (pas de preuve anti-triche). Ces valeurs alimentent
-  l'historique personnel, mais ne doivent jamais constituer une preuve formelle.
+© Didier SEBASTIEN — 2026 · v12
 
-### Statistiques personnelles (étape 6 — backend)
-
-- `src/StatsService.php` : calcul des agrégats par mode (`multiplication` | `addition`),
-  **uniquement** depuis l'identité de session (`user_id` jamais fourni par le client) :
-  - totaux globaux (nombre de parties, score moyen sur 10, meilleur score) ;
-  - moyennes sur fenêtres glissantes de **7** et **30 jours** (UTC, indépendantes du fuseau serveur) ;
-  - courbe des **30 dernières parties** (par récence, rendue chronologique) ;
-  - histogramme des parties par jour sur les **30 derniers jours**, regroupé selon
-    le **fuseau Indian/Reunion (UTC+4)** — chaque journée est présente (`games = 0`
-    si aucune partie), pour un tracé continu.
-- `src/ResultRepository.php` : nouvelles méthodes d'agrégation préparées
-  (`totals`, `countSince`, `periodAverage`, `recentScores`, `playedAtValues`).
-  Aucune modification du schéma SQLite. Les parties **importées** depuis le mode
-  invité résident dans la même table `results` : elles sont donc comptées.
-- Nouvelle route API (`GET`, session requise) :
-  - `stats?mode=<multiplication|addition>` : renvoie `{ mode, generated_at_utc,
-    totals, periods, progression, daily_games }` ; mode inconnu => `400`.
-
-### Interface des statistiques (étape 6B — frontend)
-
-L'écran « Mes statistiques » (`#statsScreen`) est accessible uniquement depuis
-l'espace du compte connecté (bouton « Mes statistiques » sur « Mon compte »).
-Il consomme **exclusivement** la route `GET stats?mode=...` — aucune donnée
-n'est inventée ni transmise par le navigateur (l'utilisateur est identifié par
-la session).
-
-- `public/stats.js` expose `window.StatsUI` (`show`, `hide`, `setSessionHandler`) :
-  - Sélecteur **Additions / Multiplications** ;
-  - cartes : nombre de parties, score moyen global, meilleur score, moyenne des
-    **7** et **30 derniers jours** (périodes **glissantes**) ;
-  - courbe d'évolution des **30 dernières parties** (axe des scores borné à 10) ;
-  - histogramme du nombre de parties **par jour calendaire de La Réunion (UTC+4)**
-    sur 30 jours (valeurs entières) ;
-  - état **vide** dédié (« aucune partie »), erreurs réseau / serveur avec bouton
-    « Réessayer », et gestion des **sessions expirées** : un `401` est relayé à
-    `account.js` via `setSessionHandler` (retour automatique à la connexion) ;
-  - destruction des instances Chart.js (`chart.destroy()`) à chaque changement de
-    mode, rechargement et départ de l'écran (`StatsUI.hide()`, appelé par la
-    navigation d'`account.js`).
-- `public/account.js` : branche l'écran statistiques dans sa navigation
-  (`data-account-nav="stats"`), appelle `StatsUI.show()/hide()` et enregistre le
-  gestionnaire de session expirée. Aucune modification des mécanismes
-  d'authentification.
-- `public/vendor/chart.js/` : **Chart.js v4.6.1** en **build UMD local**,
-  distribué sous **licence MIT** (voir `LICENSE.md` et `README.md` dans ce
-  dossier pour version, provenance et compatibilité CSP). Chargé en same-origin
-  avant `stats.js` ; compatible `style-src 'self'` (aucun `<style>` inline ni
-  attribut `style=""` injecté — rendu sur `<canvas>`).
-- Accessibilité : alternative textuelle (`sr-only`) pour chaque graphique, libellés
-  `aria-label` sur les `canvas`, sélecteur en `fieldset`/boutons `aria-pressed`.
-- Responsive : grille de cartes et hauteurs de graphiques adaptées aux petits écrans.
-
-### Questions « à trou » (v12.3)
-
-- Trois **types de questions** configurables (fieldset « Type de questions » dans la config) :
-  - **Classique** : aucune question à trou (`3 × 6 = ?`) — comportement historique, défaut.
-  - **À trou** : toutes les questions masquent un opérande (`? × 6 = 18` ou `3 × ? = 18`),
-    position aléatoire (1er ou 2e opérande).
-  - **Mélange** : répartition équilibrée (~50 % classiques / ~50 % à trou, écart nul sur
-    10 questions), positions aléatoires.
-- Répartition des trous faite dans `generateUniqueQuestions()` (app.js) ; chaque question
-  porte un champ `hole` (`"a"` = 1er opérande, `"b"` = 2e, `null` = classique).
-- Affichage via `questionDisplay()` et validation via `questionAnswer()` (la bonne réponse
-  est l'opérande masqué) ; le débrief révèle toujours l'équation complète des deux opérandes.
-- Le type de questions est persisté **en localStorage** (`questionType` dans la config) et
-  **en SQLite** (colonne `question_type` de `results`, contrainte CHECK, migration idempotente).
-- Le type est transmis à `result/save` (`question_type`) et affiché dans le classement
-  (colonne « À trou » : Oui pour `hole`/`mixed`, Non pour `classic`).
-
-### Mode invité et historique local
-
-- `public/guest-history.js` : module autonome, exposé en `window.MissionGuestHistory`.
-  - Espace `localStorage` DÉDIÉ v12 : `missionCalculMental.history.v12`
-    (trace d'imports réussis : `missionCalculMental.history.v12.imported`).
-  - Les clés v10/v11 existantes ne sont **ni lues, ni modifiées, ni supprimées**.
-  - En invité : chaque partie terminée est enregistrée localement (avec un
-    `guest_id` stable pour un import idempotent ultérieur).
-  - En connecté (`setSession()` non null) : la partie est envoyée au serveur,
-    jamais stockée localement (pas de mélange invité / compte).
-- Intégration dans `public/app.js` : `finalizeMission()` appelle `GuestHistoryV12.record()`
-  à la fin de chaque partie terminée.
-
-### Import invité
-
-- `GuestHistoryV12.importToAccount(confirmFn)` : import volontaire, avec
-  **confirmation explicite**, envoi au serveur, et conservation d'une trace locale
-  des éléments importés (pas de réimport). Aucune donnée locale n'est supprimée en
-  cas d'échec. Le serveur refuse les doublons (colonne unique `guest_id`).
-- La trace d'imports est **scopée par compte** (`missionCalculMental.history.v12.imported.<id>`),
-  ce qui permet d'utiliser plusieurs comptes sur un même navigateur sans jamais
-  ré-importer, ni mélanger les états.
-
-### Interface de comptes (étape 4)
-
-`public/account.js` (chargé après `guest-history.js` et `app.js`) expose
-`window.AccountUI` :
-
-- **Session côté serveur** : aucune logique d'authentification parallèle ; on
-  réutilise les routes PHP existantes (`auth/csrf`, `auth/login`, `auth/register`,
-  `auth/logout`, `profile`, `profile/password`).
-- **Cookies sécurisés** gérés par PHP (`SameSite=Lax` + `HttpOnly`). Aucun mot de
-  passe ni cookie de session n'est stocké dans `localStorage` ; seul l'utilisateur
-  public et le jeton CSRF sont gardés **en mémoire** (jamais réhydratés au rechargement).
-- Au chargement / à l'actualisation, on récupère le jeton CSRF puis le profil, et on
-  branche `GuestHistoryV12.setSession({ token, user })` (ou `null`) selon l'état.
-- **Connexion, inscription, profil (mot de passe)** avec messages d'erreur
-  explicites (contraintes : identifiant 3-40 alphanumériques/`_`, mot de passe ≥ 10).
-  Les comptes reposent uniquement sur un **identifiant unique** et un **mot de passe
-  de 10 caractères minimum** ; aucune adresse e-mail n'est gérée.
-- **Import volontaire** des parties invitées depuis « Mon compte », avec
-  **confirmation explicite** (`confirm()`), affichage du nombre importé / déjà
-  présent (`doublon`), et conservation des données locales en cas d'échec.
-- L'accès au compte est **désactivé pendant une partie en cours** (un message
-  l'indique) et la session expirée est détectée proprement (401 → retour à la
-  connexion sans perte de données).
-
----
-
-## Difficultés personnelles (v12.4)
-
-La **v12.4** mémorise, pour chaque utilisateur connecté, la **difficulté par opération**
-(par ex. `6 × 7`) afin d'identifier les tables à travailler. C'est une fonctionnalité de
-**suivi pédagogique** : elle ne modifie ni le générateur de questions, ni l'attribution
-des scores, et fonctionne de façon **inchangée pour les invités** (qui ne disposent pas de
-ce suivi personnalisé).
-
-### Quatre catégories indépendantes
-
-La difficulté est suivie séparément selon **deux axes** :
-
-- **Opération** : `addition` | `multiplication`.
-- **Type de question** : `classic` (classique) | `hole` (à trou).
-
-Soit **quatre catégories** (`addition/classic`, `addition/hole`, `multiplication/classic`,
-`multiplication/hole`), chacune avec sa propre mémoire. Les calculs commutatifs (`6 × 7` et
-`7 × 6`) ainsi que les deux positions du trou comptent ensemble.
-
-### Coefficient de difficulté (0–5)
-
-Chaque opération porte un **coefficient évolutif de 0 à 5** :
-
-- **+1** par **erreur** ou **temps écoulé** ;
-- **−1** toutes les **deux réussites consécutives**.
-
-Le coefficient est borné entre 0 et 5. Une opération dont la difficulté revient à **0**
-est **conservée** (elle reste suivie, mais n'apparaît plus comme point à travailler).
-
-### Bilan « Mes points à travailler »
-
-Une rubrique dédiée dans les statistiques synthétise, **par table** (et non par opération
-individuelle), le statut pédagogique associé :
-
-- `to_work` (à travailler) → `in_progress` (en progrès) → `insufficient` (à pratiquer) →
-  `mastered` (surmontée).
-
-Les tables sont classées, séparément pour le **classique** et pour le **à trou**, par :
-
-1. **coefficient de difficulté décroissant** ;
-2. à difficulté égale, par **statut** (à travailler → en progrès → à pratiquer → surmontée) ;
-3. à statut égal, par **numéro de table croissant**.
-
-### Sauvegarde atomique et idempotente
-
-L'enregistrement d'une partie met à jour la mémoire des difficultés **de façon atomique**
-(transaction SQLite) : soit toutes les opérations de la partie sont prises en compte, soit
-aucune. Le mécanisme protège contre les **doublons** : une même partie n'incrémente la
-difficulté qu'**une seule fois** (même identifiant de partie), même en cas de rejeu ou de
-soumission répétée.
-
-### Tables SQLite
-
-Deux nouvelles tables, créées par une **migration automatique et idempotente** à la
-connexion de la base :
-
-- **`operations_difficulty`** : mémoire actuelle de la difficulté par
-  (utilisateur, mode, type de question, opérande_a, opérande_b).
-- **`mission_difficulty_log`** : journal des occurrences (succès / échec) qui alimente le
-  calcul du coefficient et la détection des réussites consécutives.
-
-### Tests de la v12.4
-
-- **Backend** (`php tests/run.php` et `php tests/http_test.php`) : migration des tables,
-  calcul du coefficient, classification des statuts, enregistrement atomique et protection
-  contre les doublons, ainsi que les routes API associées.
-- **Frontend** (`osascript -l JavaScript tests/js_difficulty_ui_test.js`) : classement des
-  tables par difficulté décroissante puis statut et numéro, séparément pour le classique et
-  le à trou, et non-modification de la liste source.
-
-### Vers la v12.5 — missions adaptatives
-
----
-
-## Entraînement adaptatif (v12.5)
-
-La **v12.5** transforme la mémoire des difficultés de la v12.4 en **missions adaptatives**.
-Une option « **M'entraîner sur mes difficultés** » est **activée par défaut** et peut être
-désactivée par le joueur.
-
-### Fonctionnement
-
-- Sur une mission, environ **40 % des questions sont ciblées** et **60 % restent
-  ordinaires**.
-- Les questions ciblées sont tirées des opérations les plus difficiles : **priorité aux
-  coefficients de difficulté les plus élevés** (classés par difficulté décroissante).
-- Lorsqu'une difficulté revient à **0**, l'opération **revient à la fréquence ordinaire**.
-- Les **paramètres de calcul** (tables, multiplication/addition) sont respectés, ainsi que
-  les types **Classique**, **À trou** et **Mélange**.
-- En mode **Mélange**, la répartition est conservée à **5 classiques / 5 à trou**.
-- Le comportement reste **normal pour les invités** ou **en l'absence de difficultés
-  compatibles** (aucune question ciblée à tirer → uniquement des questions ordinaires).
-
-### API et intégration
-
-- Nouvelle API **`difficulty/operations`** : renvoie les opérations en difficulté, classées
-  par coefficient décroissant.
-- Les difficultés sont **chargées au lancement de chaque mission** (et non en cache figé).
-- Les coefficients agrégés sont affichés avec une **précision au demi-point** (ex. `3.5`).
-
-### Implémentation
-
-- **`public/adaptive-generator.js`** : générateur adaptatif (sélection des 40 % ciblés,
-  priorité aux coefficients élevés, respect des types et de la répartition Mélange).
-
-### Tests de la v12.5
-
-- **Backend** : `php tests/difficulty_melange_repro.php` (répartition 5/5 en Mélange) ;
-  les routes `difficulty/operations` sont couvertes par `php tests/run.php` et
-  `php tests/http_test.php`.
-- **Frontend** : `osascript -l JavaScript tests/js_adaptive_generator_test.js` (logique du
-  générateur) et `tests/js_adaptive_integration_test.js` (intégration avec le chargement
-  des difficultés et l'option).
-
----
-
-## Sécurité applicative (principes appliqués côté PHP)
-
-- Mots de passe hachés avec `password_hash(..., PASSWORD_ARGON2ID)` ; `password_verify`
-  pour la vérification. Jamais stockés en clair.
-- Requêtes SQL **préparées** (PDO) — aucune concaténation directe.
-- Sessions PHP avec cookies `HttpOnly`, `SameSite=Lax`, `Secure` en HTTPS ;
-  `session_regenerate_id()` après connexion ; destruction de session à la déconnexion.
-- Protection **CSRF** sur toute opération modifiant des données.
-- Limitation des tentatives de connexion.
-- Contrôle des autorisations **côté serveur** (rôle `admin`) pour toute opération
-  d'administration.
-- Secrets jamais inclus dans le code source ni dans les réponses JSON.
-
----
-
-## Vérification manuelle de l’interface d’administration (frontend)
-
-L’interface d’administration (`public/admin.js`, section `#adminScreen`) n’est qu’une
-commodité : **toute la sécurité reste côté serveur** (rôle `admin`, jeton CSRF sur les POST,
-règle du « dernier administrateur actif », invalidation des sessions des comptes désactivés).
-
-### Prérequis
-
-- Le premier compte administrateur a été créé (`php scripts/initialize.php`, login `admin`).
-- Le serveur est lancé : `php -S localhost:8000 -t public`, puis ouvrir `http://localhost:8000/`.
-
-### Parcours recommandé (Firefox)
-
-1. **Connexion admin** : depuis l’accueil, « Se connecter / S’inscrire », puis identifiants admin.
-   Le bouton **« Administration »** doit apparaître dans la barre de compte (uniquement pour le rôle
-   `admin`), à côté de « Mon compte ».
-2. **Tableau de bord** : cliquer « Administration ». Vérifier les 8 cartes statistiques (comptes,
-   admins, actifs, parties totales, 7 j, 30 j, répartition mult/add) et la note de période.
-3. **Liste des comptes** : tableau avec rôle/statut/date ; tester la recherche par identifiant
-   (saisie avec debounce ~350 ms et bouton « Rechercher »).
-4. **Détail d’un compte** : « Consulter » → panneau avec fiche (rôle, statut, création, dernier
-   accès, parties jouées) et historique récent ; « Fermer » le referme.
-5. **Actions sensibles** (chacune est précédée d’un `window.confirm`) :
-   - *Promouvoir / rétrograder* un compte (admin/role) — la rétrogradation du **dernier admin actif**
-     doit être refusée par le serveur avec un message clair.
-   - *Désactiver / réactiver* un compte (admin/active). Une fois désactivé, tenter de se connecter
-     avec ce compte doit échouer (403), et une session déjà ouverte de ce compte doit être
-     immédiatement inutilisable (401 → retour à la connexion).
-   - *Reset mot de passe* (admin/password) : une boîte affiche **une seule fois** le mot de passe
-     temporaire, avec bouton « Copier » puis fermeture.
-6. **Responsive** : réduire la fenêtre (< 650 px) — tableau défilable, cartes sur 2 puis 1 colonne,
-   recherche et panneau de détail empilés.
-7. **Rôles** : se connecter en compte non-admin → le bouton « Administration » est masqué et,
-   si l’écran était ouvert, l’utilisateur est ramené à l’accueil (protection visuelle ; la
-   protection réelle reste le 403 côté serveur).
+This repository does **not** currently distribute an open-source license file. No license is
+implied; please contact the author before reusing significant portions of the code.
 

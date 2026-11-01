@@ -30,6 +30,43 @@ const StatsUI = (() => {
   let currentFetch = null;
   let sessionTimeoutHandler = null;
 
+  // Données rendues en mémoire (pour le réaffichage sans requête lors d'un
+  // changement de langue).
+  let cachedData = null;
+
+  // ------------------------------------------------------------------ i18n
+
+  /** Langue courante ; repli français si le moteur est indisponible. */
+  function statsLocale() {
+    const I = window && window.I18N;
+    return (I && typeof I.getLocale === "function") ? I.getLocale() : "fr";
+  }
+
+  /** Traduction + interpolation ; repli français si le moteur est indisponible. */
+  function i18nT(key, vars, fallback) {
+    const I = window && window.I18N;
+    if (I && typeof I.t === "function") return I.t(key, vars);
+    return fallback;
+  }
+
+  /** Séparateur décimal de la langue courante (Intl), sinon « , » (français). */
+  function decimalSeparator(locale) {
+    try {
+      const parts = new Intl.NumberFormat(locale || "fr").formatToParts(1.5);
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i].type === "decimal") return parts[i].value;
+      }
+    } catch (e) { /* formatToParts indisponible */ }
+    return ",";
+  }
+
+  /** Formatte un nombre selon la langue courante ; repli français sinon. */
+  function i18nNumber(value) {
+    const I = window && window.I18N;
+    if (I && typeof I.formatNumber === "function") return I.formatNumber(value);
+    return Number(value).toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+  }
+
   // ------------------------------------------------------------------ Utilitaires
 
   /** Crée un élément avec du texte (aucune donnée non échappée en HTML). */
@@ -40,21 +77,39 @@ const StatsUI = (() => {
     return node;
   }
 
-  /** Formatte "YYYY-MM-DD" (jour calendaire déjà exprimé en heure de La Réunion). */
-  const FR_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+  /**
+   * Formatte "YYYY-MM-DD" (jour calendaire déjà exprimé en heure de La Réunion)
+   * selon la langue courante. On construit une date à midi UTC à partir des
+   * composantes (année-mois-jour) pour que la présentation ne décale jamais le
+   * jour calendaire de référence (Indian/Reunion, UTC+4) : seule l'apparence
+   * change, pas la valeur ni le regroupement par jour.
+   */
   function formatDay(day) {
     if (typeof day !== "string") return "";
     const m = day.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!m) return day;
+    const year = parseInt(m[1], 10);
     const month = parseInt(m[2], 10);
     const d = parseInt(m[3], 10);
-    return d + " " + (FR_MONTHS[month - 1] || "");
+    const stable = new Date(Date.UTC(year, month - 1, d, 12, 0, 0));
+    if (isNaN(stable.getTime())) return day;
+    const I = window && window.I18N;
+    try {
+      const fmt = (I && typeof I.formatDate === "function")
+        ? I.formatDate(stable, { day: "numeric", month: "short" })
+        : stable.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+      return fmt;
+    } catch (e) {
+      return d + " " + (FR_MONTHS_FALLBACK[month - 1] || "");
+    }
   }
+  /** Repli français (mois abrégés) si Intl n'est pas disponible. */
+  const FR_MONTHS_FALLBACK = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
   /** Formatte une moyenne : réel → 1 décimale, sinon "—". */
   function fmtAvg(value) {
     if (value === null || value === undefined || isNaN(Number(value))) return "—";
-    return (Number(value)).toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+    return i18nNumber(Number(value));
   }
 
   function destroyCharts() {
@@ -74,11 +129,11 @@ const StatsUI = (() => {
 
     const wrapper = el("div", "stats-cards");
     const specs = [
-      { label: "Parties jouées", value: String(totals.games ?? 0), hint: "au total" },
-      { label: "Score moyen global", value: fmtAvg(totals.avg_score), hint: "/10" },
-      { label: "Meilleur score", value: fmtAvg(totals.best_score), hint: "/10" },
-      { label: "Moyenne · 7 derniers jours", value: fmtAvg(last7.avg_score), hint: "/10" },
-      { label: "Moyenne · 30 derniers jours", value: fmtAvg(last30.avg_score), hint: "/10" },
+      { label: i18nT("stats.gamesPlayed", null, "Parties jouées"), value: String(totals.games ?? 0), hint: i18nT("stats.hintTotal", null, "au total") },
+      { label: i18nT("stats.avgScoreGlobal", null, "Score moyen global"), value: fmtAvg(totals.avg_score), hint: i18nT("stats.hintOver10", null, "/10") },
+      { label: i18nT("stats.bestScore", null, "Meilleur score"), value: fmtAvg(totals.best_score), hint: i18nT("stats.hintOver10", null, "/10") },
+      { label: i18nT("stats.avg7days", null, "Moyenne · 7 derniers jours"), value: fmtAvg(last7.avg_score), hint: i18nT("stats.hintOver10", null, "/10") },
+      { label: i18nT("stats.avg30days", null, "Moyenne · 30 derniers jours"), value: fmtAvg(last30.avg_score), hint: i18nT("stats.hintOver10", null, "/10") },
     ];
     specs.forEach((s) => {
       const card = el("div", "stat-card");
@@ -93,9 +148,9 @@ const StatsUI = (() => {
   function buildPeriodNote() {
     const note = el("div", "stats-note");
     const p = document.createElement("p");
-    p.textContent =
+    p.textContent = i18nT("stats.periodNote", null,
       "Les moyennes des 7 et 30 jours concernent des périodes glissantes (7 et 30 derniers jours). " +
-      "L'histogramme représente les parties par jour calendaire de La Réunion (UTC+4) sur les 30 derniers jours.";
+      "L'histogramme représente les parties par jour calendaire de La Réunion (UTC+4) sur les 30 derniers jours.");
     note.appendChild(p);
     return note;
   }
@@ -106,17 +161,17 @@ const StatsUI = (() => {
   function buildProgressionTable(list) {
     const dl = document.createElement("dl");
     dl.className = "sr-only stats-fallback";
-    dl.setAttribute("aria-label", "Détail des scores des 30 dernières parties");
+    dl.setAttribute("aria-label", i18nT("aria.progressionDetail", null, "Détail des scores des 30 dernières parties"));
     (list || []).forEach((score, i) => {
       const dt = document.createElement("dt");
-      dt.textContent = "Partie " + (i + 1);
+      dt.textContent = i18nT("stats.partGame", { n: i + 1 }, "Partie " + (i + 1));
       const dd = document.createElement("dd");
       dd.textContent = score + " / 10";
       dl.append(dt, dd);
     });
     if (!list || list.length === 0) {
       const p = document.createElement("p");
-      p.textContent = "Aucune partie enregistrée.";
+      p.textContent = i18nT("stats.noGames", null, "Aucune partie enregistrée.");
       dl.appendChild(p);
     }
     return dl;
@@ -126,12 +181,16 @@ const StatsUI = (() => {
   function buildDailyTable(daily) {
     const dl = document.createElement("dl");
     dl.className = "sr-only stats-fallback";
-    dl.setAttribute("aria-label", "Parties jouées par jour (30 derniers jours, jours de La Réunion)");
+    dl.setAttribute("aria-label", i18nT("aria.dailyDetail", null, "Parties jouées par jour (30 derniers jours, jours de La Réunion)"));
     (daily || []).forEach((row) => {
       const dt = document.createElement("dt");
       dt.textContent = formatDay(row.day) || String(row.day);
       const dd = document.createElement("dd");
-      dd.textContent = (Number(row.games) || 0) + " partie" + (Number(row.games) > 1 ? "s" : "");
+      const n = Number(row.games) || 0;
+      const I = window && window.I18N;
+      dd.textContent = (I && typeof I.pl === "function")
+        ? I.pl("stats.game", n, { count: n })
+        : n + " partie" + (n > 1 ? "s" : "");
       dl.append(dt, dd);
     });
     return dl;
@@ -167,13 +226,13 @@ const StatsUI = (() => {
     const factory = chartFactory();
     if (!factory) return;
     const colors = baseColors();
-    const labels = (list || []).map((_, i) => "Partie " + (i + 1));
+    const labels = (list || []).map((_, i) => i18nT("stats.partGame", { n: i + 1 }, "Partie " + (i + 1)));
     const chart = new factory(canvas, {
       type: "line",
       data: {
         labels,
         datasets: [{
-          label: "Score",
+          label: i18nT("stats.chartLabelScore", null, "Score"),
           data: list || [],
           borderColor: colors.primary,
           backgroundColor: "rgba(40,127,121,.12)",
@@ -200,7 +259,7 @@ const StatsUI = (() => {
             max: 10,
             ticks: { stepSize: 1, color: colors.text },
             grid: { color: colors.grid },
-            title: { display: true, text: "Note (/10)" },
+            title: { display: true, text: i18nT("stats.hintOver10", null, "/10") },
           },
           x: {
             ticks: { color: colors.text, maxTicksLimit: 12, autoSkip: true },
@@ -223,7 +282,7 @@ const StatsUI = (() => {
       data: {
         labels,
         datasets: [{
-          label: "Parties",
+          label: i18nT("stats.gamesPlayed", null, "Parties"),
           data: values,
           backgroundColor: colors.primaryLight,
           borderColor: colors.primary,
@@ -238,7 +297,15 @@ const StatsUI = (() => {
         plugins: {
           legend: { display: false },
           tooltip: {
-            callbacks: { label: (ctx) => ctx.parsed.y + " partie" + (ctx.parsed.y > 1 ? "s" : "") },
+            callbacks: {
+              label: (ctx) => {
+                const n = ctx.parsed.y;
+                const I = window && window.I18N;
+                return (I && typeof I.pl === "function")
+                  ? I.pl("stats.game", n, { count: n })
+                  : n + " partie" + (n > 1 ? "s" : "");
+              },
+            },
           },
         },
         scales: {
@@ -246,7 +313,7 @@ const StatsUI = (() => {
             beginAtZero: true,
             ticks: { stepSize: 1, precision: 0, color: colors.text },
             grid: { color: colors.grid },
-            title: { display: true, text: "Parties" },
+            title: { display: true, text: i18nT("stats.gamesPlayed", null, "Parties") },
           },
           x: {
             ticks: { color: colors.text, maxTicksLimit: 12, autoSkip: true, maxRotation: 60 },
@@ -266,10 +333,10 @@ const StatsUI = (() => {
   /** Libellés pédagogiques des statuts de table (v12.4). */
   function difficultyLabels() {
     return {
-      to_work: "À travailler",
-      in_progress: "En progrès",
-      mastered: "Surmontée",
-      insufficient: "À pratiquer",
+      to_work: i18nT("difficulty.statusToWork", null, "À travailler"),
+      in_progress: i18nT("difficulty.statusInProgress", null, "En progrès"),
+      mastered: i18nT("difficulty.statusMastered", null, "Surmontée"),
+      insufficient: i18nT("difficulty.statusInsufficient", null, "À pratiquer"),
     };
   }
 
@@ -279,16 +346,22 @@ const StatsUI = (() => {
    *
    * Les agrégats par table sont des sommes de contributions pondérées de 0,5
    * (un calcul commutatif 6×7 et 7×6 compte pour 0,5 sur chaque table) : on les
-   * restitue donc au demi-point le plus proche, formatés avec une virgule
-   * décimale française et sans décimale terminale inutile. Une difficulté qui
+   * restitue donc au demi-point le plus proche, formatés avec le séparateur
+   * décimal de la langue courante (virgule en français/espagnol, point en
+   * anglais/chinois) et sans décimale terminale inutile. Une difficulté qui
    * baisse de 2 à 1,5 devient ainsi visible, là où l'ancien arrondi entier
-   * affichait « 2 » dans les deux cas.
+   * affichait « 2 » dans les deux cas. La précision au demi-point est
+   * strictement préservée (2 → « 2 », 1,5 → « 1,5 »/« 1.5 », 0,5 → « 0,5 »/« 0.5 »).
    */
   function formatDiff(value) {
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return "0";
     const half = Math.round(n * 2) / 2; // précision au demi-point
-    return half.toFixed(1).replace(/\.0$/, "").replace(".", ",");
+    const integer = Math.floor(half);
+    const frac = half - integer;
+    if (frac === 0) return String(integer);
+    // demi-point : séparateur décimal de la langue courante.
+    return integer + decimalSeparator(statsLocale()) + "5";
   }
 
   /**
@@ -302,10 +375,11 @@ const StatsUI = (() => {
    */
   function attemptsLabel(attempts) {
     const n = Number(attempts);
-    if (!Number.isFinite(n) || n <= 0) return "pas encore pratiquée";
-    if (n < 1) return "moins d'une tentative";
+    if (!Number.isFinite(n) || n <= 0) return i18nT("difficulty.notPracticed", null, "pas encore pratiquée");
+    if (n < 1) return i18nT("difficulty.lessThanOneTry", null, "moins d'une tentative");
     const rounded = Math.round(n);
-    return "environ " + rounded + " tentative" + (rounded > 1 ? "s" : "");
+    if (rounded === 1) return i18nT("difficulty.aboutOneTry", null, "environ 1 tentative");
+    return i18nT("difficulty.aboutTries", { count: rounded }, "environ " + rounded + " tentatives");
   }
 
   /**
@@ -349,7 +423,7 @@ const StatsUI = (() => {
 
     if (!list || list.length === 0) {
       block.appendChild(el("p", "diff-empty",
-        "Aucune information pour le moment. Jouez des parties de ce type pour suivre vos progrès."));
+        i18nT("difficulty.empty", null, "Aucune information pour le moment. Jouez des parties de ce type pour suivre vos progrès.")));
       return block;
     }
 
@@ -359,9 +433,11 @@ const StatsUI = (() => {
       const li = document.createElement("li");
       li.className = "diff-table status-" + (t.status || "");
       li.setAttribute("role", "listitem");
-      li.appendChild(el("span", "diff-table-name", "Table de " + t.table));
-      li.appendChild(el("span", "diff-table-status", difficultyLabels()[t.status] || t.status));
-      li.appendChild(el("span", "diff-table-diff", "difficulté " + formatDiff(t.difficulty)));
+      li.appendChild(el("span", "diff-table-name",
+        i18nT("difficulty.table", { table: t.table }, "Table de " + t.table)));
+      li.appendChild(el("span", "diff-table-status", difficultyLabels()[t.status] || t.status || ""));
+      li.appendChild(el("span", "diff-table-diff",
+        i18nT("difficulty.difficultyLabel", { value: formatDiff(t.difficulty) }, "difficulté " + formatDiff(t.difficulty))));
       li.appendChild(el("span", "diff-table-attempts", attemptsLabel(t.attempts)));
       ul.appendChild(li);
     });
@@ -376,17 +452,20 @@ const StatsUI = (() => {
    */
   function buildDifficultySection(d) {
     const container = el("section", "stats-difficulty");
-    container.appendChild(el("h3", null, "Mes points à travailler"));
+    container.appendChild(el("h3", null, i18nT("difficulty.title", null, "Mes points à travailler")));
     container.appendChild(el("p", "diff-intro",
-      "Les tables à travailler sont indiquées par une difficulté de 0 (facile) à 5 (difficile). " +
-      "Les calculs commutatifs et les deux positions du trou comptent ensemble."));
+      i18nT("difficulty.intro", null,
+        "Les tables à travailler sont indiquées par une difficulté de 0 (facile) à 5 (difficile). " +
+        "Les calculs commutatifs et les deux positions du trou comptent ensemble.")));
 
     const diff = (d && d.difficulty) || {};
     const modeKey = activeMode === "addition" ? "addition" : "multiplication";
     const rubrique = diff[modeKey] || { classic: [], hole: [] };
 
-    container.appendChild(buildDifficultyTableBlock("Calculs classiques", rubrique.classic));
-    container.appendChild(buildDifficultyTableBlock("Calculs à trou", rubrique.hole));
+    container.appendChild(buildDifficultyTableBlock(
+      i18nT("difficulty.classic", null, "Calculs classiques"), rubrique.classic));
+    container.appendChild(buildDifficultyTableBlock(
+      i18nT("difficulty.hole", null, "Calculs à trou"), rubrique.hole));
     return container;
   }
 
@@ -418,10 +497,9 @@ const StatsUI = (() => {
     // Aucune partie jouée : état vide explicite (pas de graphique vide).
     if (totalGames === 0) {
       const empty = el("div", "stats-empty");
-      const title = el("h3", null, "Aucune partie pour le moment");
-      const text = el("p", null,
-        "Jouez des parties en « " + (MODES[activeMode] || activeMode) + " » pour voir apparaître " +
-        "vos statistiques. Elles ne concernent que ce type de calcul.");
+      const title = el("h3", null, i18nT("stats.noGamesYet", null, "Aucune partie pour le moment"));
+      const text = el("p", null, i18nT("stats.noGamesText", { mode: modeLabel(activeMode) },
+        "Jouez des parties en « " + modeLabel(activeMode) + " » pour voir apparaître vos statistiques. Elles ne concernent que ce type de calcul."));
       empty.append(title, text);
       content.appendChild(empty);
       return;
@@ -432,11 +510,11 @@ const StatsUI = (() => {
       // 1. Courbe des 30 dernières parties.
       const block = el("div", "chart-block");
       const head = document.createElement("h3");
-      head.textContent = "Évolution des scores (30 dernières parties)";
+      head.textContent = i18nT("stats.curveTitle", null, "Évolution des scores (30 dernières parties)");
       const canvasWrap = el("div", "chart-box chart-box-line");
       const canvas = document.createElement("canvas");
       canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", "Courbe des scores des 30 dernières parties");
+      canvas.setAttribute("aria-label", i18nT("aria.progressionCurve", null, "Courbe des scores des 30 dernières parties"));
       canvasWrap.appendChild(canvas);
       block.appendChild(head);
       block.appendChild(canvasWrap);
@@ -446,11 +524,11 @@ const StatsUI = (() => {
       // 2. Histogramme journalier.
       const block2 = el("div", "chart-block");
       const head2 = document.createElement("h3");
-      head2.textContent = "Parties par jour (30 derniers jours · La Réunion)";
+      head2.textContent = i18nT("stats.dailyTitle", null, "Parties par jour (30 derniers jours · La Réunion)");
       const canvasWrap2 = el("div", "chart-box chart-box-bar");
       const canvas2 = document.createElement("canvas");
       canvas2.setAttribute("role", "img");
-      canvas2.setAttribute("aria-label", "Histogramme des parties par jour sur les 30 derniers jours");
+      canvas2.setAttribute("aria-label", i18nT("aria.dailyHistogram", null, "Histogramme des parties par jour sur les 30 derniers jours"));
       canvasWrap2.appendChild(canvas2);
       block2.appendChild(head2);
       block2.appendChild(canvasWrap2);
@@ -464,9 +542,10 @@ const StatsUI = (() => {
     } else {
       // Chart.js indisponible : alternative textuelle lisible sans graphique.
       const block = el("div", "stats-empty");
-      const title = el("h3", null, "Graphiques indisponibles");
+      const title = el("h3", null, i18nT("stats.chartsUnavailable", null, "Graphiques indisponibles"));
       const text = el("p", null,
-        "La bibliothèque de graphiques n'a pas pu être chargée. Les données restent consultables ci-dessous.");
+        i18nT("stats.chartsUnavailableText", null,
+          "La bibliothèque de graphiques n'a pas pu être chargée. Les données restent consultables ci-dessous."));
       block.append(title, text);
       content.appendChild(block);
       content.appendChild(buildProgressionTable(progression));
@@ -475,6 +554,13 @@ const StatsUI = (() => {
   }
 
   // ------------------------------------------------------------ États et erreurs
+
+  /** Libellé localisé du mode de calcul (pour les textes descriptifs). */
+  function modeLabel(mode) {
+    if (mode === "multiplication") return i18nT("common.multiplications", null, "Multiplications");
+    if (mode === "addition") return i18nT("common.additions", null, "Additions");
+    return mode || "";
+  }
 
   function setLoading(text) {
     const content = document.getElementById("statsContent");
@@ -498,9 +584,9 @@ const StatsUI = (() => {
     const p = el("p", null, message);
     block.append(h, p);
 
-    const btn = el("button", "btn btn-secondary", "Réessayer");
+    const btn = el("button", "btn btn-secondary", i18nT("common.retry", null, "Réessayer"));
     btn.type = "button";
-    btn.addEventListener("click", () => show(activeMode));
+    btn.addEventListener("click", () => show(activeMode, true));
     block.appendChild(btn);
 
     content.appendChild(block);
@@ -509,12 +595,20 @@ const StatsUI = (() => {
 
   // -------------------------------------------------  Chargement depuis l'API
 
-  async function show(modeOverride) {
+  async function show(modeOverride, refresh) {
     const readyMode = modeOverride || activeMode;
     if (MODES[readyMode]) activeMode = readyMode;
 
     syncModeButtons();
-    setLoading("Chargement de vos statistiques…");
+    setLoading(i18nT("stats.loading", null, "Chargement de vos statistiques…"));
+
+    // Réaffichage en mémoire après un changement de langue (aucune requête) :
+    // si les données sont déjà là et qu'on n'a pas demandé explicitement un
+    // rafraîchissement réseau, on redessine simplement avec la langue courante.
+    if (cachedData && !refresh) {
+      renderData(cachedData);
+      return;
+    }
 
     // Annule toute requête encore en vol (navigation/mode précédent).
     if (currentFetch && currentFetch.abort) currentFetch.abort();
@@ -533,7 +627,7 @@ const StatsUI = (() => {
           ok: r.status >= 200 && r.status < 300 && body.ok === true,
           status: r.status,
           data: body.data || null,
-          error: body.error || (r.status === 401 ? "Authentification requise." : ""),
+          error: body.error || (r.status === 401 ? i18nT("error.authRequired", null, "Authentification requise.") : ""),
         };
       })(currentFetch.signal);
 
@@ -545,18 +639,22 @@ const StatsUI = (() => {
         return;
       }
       if (res.status === 0) {
-        showError("Erreur réseau", "Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez.");
+        showError(i18nT("stats.networkError", null, "Erreur réseau"),
+          i18nT("stats.networkErrorText", null, "Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez."));
         return;
       }
       if (!res.ok) {
-        showError("Impossible de charger les statistiques", res.error || "Le serveur a renvoyé une erreur.");
+        showError(i18nT("stats.errorTitle", null, "Impossible de charger les statistiques"),
+          res.error || i18nT("stats.serverError", null, "Le serveur a renvoyé une erreur."));
         return;
       }
-      renderData(res.data || {});
+      cachedData = res.data || {};
+      renderData(cachedData);
     } catch (err) {
       currentFetch = null;
       if (err && (err.name === "AbortError" || err.name === "AbortSignal")) return;
-      showError("Erreur réseau", "Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez.");
+      showError(i18nT("stats.networkError", null, "Erreur réseau"),
+        i18nT("stats.networkErrorText", null, "Impossible de joindre le serveur. Vérifiez votre connexion puis réessayez."));
     }
   }
 
@@ -591,7 +689,39 @@ const StatsUI = (() => {
 
   document.addEventListener("DOMContentLoaded", () => {
     bindEvents();
+
+    // v12.6-B3.3 — Actualisation immédiate des statistiques lors d'un changement
+    // de langue : on réaffirme l'écran affiché à partir des données EN MÉMOIRE
+    // (aucune requête réseau superflue ; le réaffichage redessine aussi les
+    // graphiques Chart.js, les légendes, les infobulles et les catégories de
+    // difficulté avec la langue courante). Si l'écran n'est pas actif ou si
+    // aucune donnée n'est en mémoire, on ne fait rien : la langue sera prise en
+    // compte au prochain chargement.
+    if (window.I18N && typeof window.I18N.onLocaleChange === "function") {
+      window.I18N.onLocaleChange(() => {
+        const screen = document.getElementById("statsScreen");
+        if (screen && screen.classList.contains("active") && cachedData) {
+          renderModeSelectorLabels();
+          show(activeMode);
+        }
+      });
+    }
   });
+
+  /** Réapplique les libellés statiques du sélecteur de mode (data-i18n). */
+  function renderModeSelectorLabels() {
+    document.querySelectorAll("[data-stats-mode]").forEach((btn) => {
+      const key = btn.getAttribute("data-i18n");
+      if (key && window.I18N && typeof window.I18N.t === "function") {
+        btn.textContent = window.I18N.t(key);
+      }
+    });
+    const fs = document.querySelector(".stats-mode-select");
+    if (fs && window.I18N && typeof window.I18N.t === "function") {
+      const akey = fs.getAttribute("data-i18n-aria-label");
+      if (akey) fs.setAttribute("aria-label", window.I18N.t(akey));
+    }
+  }
 
   return {
     show,
@@ -599,6 +729,19 @@ const StatsUI = (() => {
     /** Enregistre le gestionnaire de session expirée (fourni par account.js). */
     setSessionHandler(fn) {
       sessionTimeoutHandler = fn;
+    },
+    /** Aides pures exposées pour les tests JXA (v12.6-B3.3). */
+    __test: {
+      formatDiff,
+      attemptsLabel,
+      modeLabel,
+      formatDay,
+      fmtAvg,
+      decimalSeparator,
+      statsLocale,
+      sortedDifficultyList,
+      difficultyLabels,
+      DIFF_STATUS_ORDER,
     },
   };
 })();

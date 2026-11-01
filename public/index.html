@@ -9,7 +9,7 @@
 </head>
 <body>
   <main class="app-shell">
-    <nav id="accountNavBar" class="app-nav-bar" aria-label="Navigation du compte">
+    <nav id="accountNavBar" class="app-nav-bar" data-i18n-aria-label="aria.navAccount">
       <div id="accountBar" class="account-bar" aria-live="polite"></div>
     </nav>
     <section id="homeScreen" class="screen active home-screen" aria-labelledby="homeTitle">
@@ -36,144 +36,144 @@
             <circle cx="18" cy="61" r="1.2" fill="#dff6ff"/>
           </svg>
         </div>
-        <div class="eyebrow">Calcul mental</div>
+        <div class="eyebrow" data-i18n="home.eyebrow">Calcul mental</div>
         <h1 id="homeTitle">Mission Multiplications</h1>
         <p class="subtitle" id="homeSubtitle">10 calculs, un chrono et une fusée à construire.</p>
         <div class="home-actions">
-          <button class="btn btn-primary btn-large" data-action="start">Lancer une mission</button>
-          <div class="secondary-actions icon-actions" aria-label="Navigation secondaire">
-            <button type="button" class="icon-btn" data-action="config" aria-label="Paramètres" data-tooltip="Paramètres">
+          <button class="btn btn-primary btn-large" data-action="start" data-i18n="home.start">Lancer une mission</button>
+          <div class="secondary-actions icon-actions" data-i18n-aria-label="aria.navSecondary">
+            <button type="button" class="icon-btn" data-action="config" data-i18n-aria-label="aria.settings" data-tooltip="Paramètres" data-i18n-tooltip="tooltip.settings">
               <img src="assets/icons/parametres.svg" alt="" width="48" height="48">
             </button>
-            <button type="button" class="icon-btn" data-action="leaderboard" aria-label="Tableau des scores" data-tooltip="Tableau des scores">
+            <button type="button" class="icon-btn" data-action="leaderboard" data-i18n-aria-label="aria.scores" data-tooltip="Tableau des scores" data-i18n-tooltip="tooltip.scores">
               <img src="assets/icons/scores.svg" alt="" width="48" height="48">
             </button>
           </div>
         </div>
       </div>
-      <footer>© Didier SEBASTIEN — 2026 · v12</footer>
+      <footer data-i18n="home.footer">© Didier SEBASTIEN — 2026 · v12</footer>
     </section>
 
     <section id="configScreen" class="screen" aria-labelledby="configTitle">
       <div class="panel narrow-panel">
         <div class="section-heading">
-          <span class="section-kicker">Préparation de mission</span>
-          <h2 id="configTitle">Paramètres</h2>
+          <span class="section-kicker" data-i18n="config.kicker">Préparation de mission</span>
+          <h2 id="configTitle" data-i18n="config.title">Paramètres</h2>
         </div>
-        <p class="muted">Les modifications sont enregistrées automatiquement.</p>
+        <p class="muted" data-i18n="config.autosave">Les modifications sont enregistrées automatiquement.</p>
 
         <fieldset class="config-group">
-          <legend>Type d’opération</legend>
-          <div class="mode-selector" role="radiogroup" aria-label="Type d’opération">
+          <legend data-i18n="config.operationType">Type d’opération</legend>
+          <div class="mode-selector" role="radiogroup" data-i18n-aria-label="aria.operationType">
             <label class="mode-option">
               <input type="radio" name="modeChoice" value="mult" data-mode-option checked>
-              <span class="mode-chip">Multiplications</span>
+              <span class="mode-chip" data-i18n="config.modeMultiplication">Multiplications</span>
             </label>
             <label class="mode-option">
               <input type="radio" name="modeChoice" value="add" data-mode-option>
-              <span class="mode-chip">Additions</span>
+              <span class="mode-chip" data-i18n="config.modeAddition">Additions</span>
             </label>
           </div>
         </fieldset>
 
         <fieldset class="config-group">
-          <legend>Type de questions</legend>
-          <div class="mode-selector" role="radiogroup" aria-label="Type de questions">
+          <legend data-i18n="config.questionType">Type de questions</legend>
+          <div class="mode-selector" role="radiogroup" data-i18n-aria-label="aria.questionType">
             <label class="mode-option">
               <input type="radio" name="questionTypeChoice" value="classic" data-question-type-option checked>
-              <span class="mode-chip" data-tooltip="Le résultat manquant, comme d’habitude.">Classique</span>
+              <span class="mode-chip" data-tooltip="Le résultat manquant, comme d’habitude." data-i18n-tooltip="tooltip.classicDesc" data-i18n="config.questionTypeClassic">Classique</span>
             </label>
             <label class="mode-option">
               <input type="radio" name="questionTypeChoice" value="hole" data-question-type-option>
-              <span class="mode-chip" data-tooltip="Un des deux nombres (ou le résultat) est caché.">À trou</span>
+              <span class="mode-chip" data-tooltip="Un des deux nombres (ou le résultat) est caché." data-i18n-tooltip="tooltip.holeDesc" data-i18n="config.questionTypeHole">À trou</span>
             </label>
             <label class="mode-option">
               <input type="radio" name="questionTypeChoice" value="mixed" data-question-type-option>
-              <span class="mode-chip" data-tooltip="Mélange : moitié Classique, moitié À trou.">Mélange</span>
+              <span class="mode-chip" data-tooltip="Mélange : moitié Classique, moitié À trou." data-i18n-tooltip="tooltip.mixedDesc" data-i18n="config.questionTypeMixed">Mélange</span>
             </label>
           </div>
         </fieldset>
 
         <fieldset id="multConfigBlock" class="config-group">
-          <legend>Tables utilisées</legend>
+          <legend data-i18n="config.multTables">Tables utilisées</legend>
           <div id="tableCheckboxes" class="table-grid"></div>
         </fieldset>
 
         <fieldset id="addConfigBlock" class="config-group" hidden>
-          <legend>Plage de nombres</legend>
-          <p class="muted small-muted">Choisissez les bornes entre lesquelles sont tirés les deux nombres de chaque addition (doubles autorisés, zéro interdit).</p>
+          <legend data-i18n="config.addRange">Plage de nombres</legend>
+          <p class="muted small-muted" data-i18n="config.addRangeHint">Choisissez les bornes entre lesquelles sont tirés les deux nombres de chaque addition (doubles autorisés, zéro interdit).</p>
           <div class="range-control">
-            <label for="addMin">De</label>
+            <label for="addMin" data-i18n="config.rangeFrom">De</label>
             <input type="number" id="addMin" min="1" max="99" step="1" inputmode="numeric">
-            <label for="addMax">à</label>
+            <label for="addMax" data-i18n="config.rangeTo">à</label>
             <input type="number" id="addMax" min="1" max="99" step="1" inputmode="numeric">
           </div>
         </fieldset>
 
         <fieldset class="config-group adaptive-setting" aria-labelledby="adaptiveTitle">
-          <legend id="adaptiveTitle">Entraînement adaptatif</legend>
+          <legend id="adaptiveTitle" data-i18n="config.adaptive">Entraînement adaptatif</legend>
           <label class="adaptive-option">
             <input type="checkbox" id="adaptiveCheckbox" data-adaptive-option>
-            <span>M’entraîner sur mes difficultés</span>
+            <span data-i18n="config.adaptiveLabel">M’entraîner sur mes difficultés</span>
           </label>
-          <p class="muted small-muted adaptive-hint">Les calculs qui vous posent problème seront proposés plus souvent.</p>
+          <p class="muted small-muted adaptive-hint" data-i18n="config.adaptiveHint">Les calculs qui vous posent problème seront proposés plus souvent.</p>
         </fieldset>
 
         <p id="tableWarning" class="inline-message" aria-live="polite"></p>
 
         <div class="config-group time-setting">
-          <label for="timeLimit">Temps par question</label>
+          <label for="timeLimit" data-i18n="config.timePerQuestion">Temps par question</label>
           <div class="number-control">
             <input type="number" id="timeLimit" min="1" max="60" step="0.5" inputmode="decimal">
-            <span>secondes</span>
+            <span data-i18n="config.timeSeconds">secondes</span>
           </div>
         </div>
 
-        <button class="btn btn-primary" data-action="home">Retour à l’accueil</button>
+        <button class="btn btn-primary" data-action="home" data-i18n="common.backToHome">Retour à l’accueil</button>
       </div>
     </section>
 
     <section id="leaderboardScreen" class="screen" aria-labelledby="leaderboardTitle">
       <div class="panel wide-panel">
         <div class="section-heading">
-          <span class="section-kicker">Centre de contrôle</span>
-          <h2 id="leaderboardTitle">Tableau des scores</h2>
+          <span class="section-kicker" data-i18n="leaderboard.kicker">Centre de contrôle</span>
+          <h2 id="leaderboardTitle" data-i18n="leaderboard.title">Tableau des scores</h2>
         </div>
-        <p class="muted">Les 20 meilleurs résultats, classés par score puis par temps.</p>
+        <p class="muted" data-i18n="leaderboard.intro">Les 20 meilleurs résultats, classés par score puis par temps.</p>
 
-        <div class="leaderboard-tabs" role="tablist" aria-label="Classement par opération">
-          <button type="button" class="leaderboard-tab" data-leaderboard-mode="mult" role="tab" aria-selected="true">
+        <div class="leaderboard-tabs" role="tablist" data-i18n-aria-label="leaderboard.tablist">
+          <button type="button" class="leaderboard-tab" data-leaderboard-mode="mult" role="tab" aria-selected="true" data-i18n="common.multiplications">
             Multiplications
           </button>
-          <button type="button" class="leaderboard-tab" data-leaderboard-mode="add" role="tab" aria-selected="false">
+          <button type="button" class="leaderboard-tab" data-leaderboard-mode="add" role="tab" aria-selected="false" data-i18n="common.additions">
             Additions
           </button>
         </div>
         <h3 id="leaderboardHeadline" class="leaderboard-headline">Top 20 — Multiplications</h3>
 
-        <div id="leaderboardEmpty" class="empty-state" hidden>Aucun score enregistré pour le moment.</div>
+        <div id="leaderboardEmpty" class="empty-state" hidden data-i18n="leaderboard.empty">Aucun score enregistré pour le moment.</div>
         <div class="table-scroll">
-          <table class="leaderboard-table" aria-label="Tableau des scores">
+          <table class="leaderboard-table" data-i18n-aria-label="aria.top20Table">
             <thead>
               <tr>
-                <th>Prénom</th>
-                <th>Score</th>
-                <th>Temps</th>
-                <th data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)">À trou</th>
+                <th data-i18n="leaderboard.columnName">Prénom</th>
+                <th data-i18n="leaderboard.columnScore">Score</th>
+                <th data-i18n="leaderboard.columnTime">Temps</th>
+                <th data-i18n="leaderboard.columnHole" data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)" data-i18n-tooltip="tooltip.holeHeader">À trou</th>
                 <th id="leaderboardDetailHeader">Tables utilisées</th>
               </tr>
             </thead>
             <tbody id="leaderboardBody"></tbody>
           </table>
         </div>
-        <button class="btn btn-primary" data-action="home">Retour à l’accueil</button>
+        <button class="btn btn-primary" data-action="home" data-i18n="common.backToHome">Retour à l’accueil</button>
       </div>
     </section>
 
     <section id="gameScreen" class="screen game-screen" aria-labelledby="missionTitle">
       <div class="game-panel">
         <div class="game-topline">
-          <span id="missionTitle">Mission en cours</span>
+          <span id="missionTitle" data-i18n="mission.title">Mission en cours</span>
           <span id="progressText">Question 1 / 10</span>
         </div>
         <div class="mission-progress" aria-hidden="true">
@@ -182,11 +182,11 @@
 
         <div class="question-zone">
           <div id="question" class="question-display" aria-live="polite"></div>
-          <label class="sr-only" for="answer">Votre réponse</label>
+          <label class="sr-only" for="answer" data-i18n="mission.yourAnswer">Votre réponse</label>
           <input type="text" id="answer" class="answer-input" autocomplete="off" inputmode="none" pattern="[0-9]*" aria-describedby="keypadHint">
-          <span id="keypadHint" class="sr-only">Utilisez le pavé numérique à l’écran ou votre clavier physique.</span>
+          <span id="keypadHint" class="sr-only" data-i18n="mission.keypadHint">Utilisez le pavé numérique à l’écran ou votre clavier physique.</span>
 
-          <div class="keypad" id="numericKeypad" aria-label="Pavé numérique">
+          <div class="keypad" id="numericKeypad" data-i18n-aria-label="aria.keypad">
             <button type="button" class="keypad-key" data-key="1">1</button>
             <button type="button" class="keypad-key" data-key="2">2</button>
             <button type="button" class="keypad-key" data-key="3">3</button>
@@ -196,31 +196,31 @@
             <button type="button" class="keypad-key" data-key="7">7</button>
             <button type="button" class="keypad-key" data-key="8">8</button>
             <button type="button" class="keypad-key" data-key="9">9</button>
-            <button type="button" class="keypad-key keypad-key-secondary" data-key="clear" aria-label="Effacer toute la saisie">C</button>
+            <button type="button" class="keypad-key keypad-key-secondary" data-key="clear" data-i18n-aria-label="aria.clearEntry">C</button>
             <button type="button" class="keypad-key" data-key="0">0</button>
-            <button type="button" class="keypad-key keypad-key-secondary" data-key="backspace" aria-label="Effacer le dernier chiffre">⌫</button>
+            <button type="button" class="keypad-key keypad-key-secondary" data-key="backspace" data-i18n-aria-label="aria.backspace">⌫</button>
           </div>
 
           <div id="feedback" class="feedback" aria-live="assertive"></div>
         </div>
 
-        <div id="timerWidget" class="timer-widget" aria-label="Temps restant">
+        <div id="timerWidget" class="timer-widget" data-i18n-aria-label="aria.timeRemaining">
           <svg class="timer-svg" viewBox="0 0 84 84" aria-hidden="true">
             <circle class="timer-ring-bg" cx="42" cy="42" r="34"/>
             <circle id="timerRing" class="timer-ring" cx="42" cy="42" r="34" pathLength="100"/>
           </svg>
-          <div class="timer-value"><strong><span id="time">5.0</span></strong><small>s</small></div>
+          <div class="timer-value"><strong><span id="time">5.0</span></strong><small data-i18n="common.seconds">s</small></div>
         </div>
 
-        <div id="rocketZone" class="rocket-zone" aria-label="Progression de la fusée">
+        <div id="rocketZone" class="rocket-zone" data-i18n-aria-label="aria.rocketProgress">
           <div class="rocket-copy">
-            <span>Construction de la fusée</span>
+            <span data-i18n="mission.construction">Construction de la fusée</span>
             <strong id="rocketPieceCount">0 / 10</strong>
           </div>
 
           <div class="rocket-stage">
             <div id="launchMessage" class="launch-message" aria-live="polite"></div>
-            <svg id="rocketAssembly" class="rocket-svg" viewBox="0 0 180 280" role="img" aria-label="Fusée composée de dix éléments">
+            <svg id="rocketAssembly" class="rocket-svg" viewBox="0 0 180 280" role="img" data-i18n-aria-label="aria.rocketOfTen">
               <defs>
                 <linearGradient id="rocketBodyGradient" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0" stop-color="#e9f6fb"/>
@@ -306,20 +306,20 @@
     <section id="resultScreen" class="screen" aria-labelledby="resultTitle">
       <div class="panel wide-panel result-panel">
         <div class="section-heading result-heading">
-          <span class="section-kicker">Rapport de mission</span>
-          <h2 id="resultTitle">Mission terminée</h2>
+          <span class="section-kicker" data-i18n="result.kicker">Rapport de mission</span>
+          <h2 id="resultTitle" data-i18n="result.title">Mission terminée</h2>
         </div>
         <div id="scoreDisplay" class="result-summary"></div>
         <div id="missionReward" class="mission-reward"></div>
 
-        <h3>Débriefing de la mission</h3>
+        <h3 data-i18n="result.debrief">Débriefing de la mission</h3>
         <div class="table-scroll compact-table-wrap">
-          <table class="debrief-table" aria-label="Débriefing des questions">
+          <table class="debrief-table" data-i18n-aria-label="aria.debrief">
             <thead>
               <tr>
-                <th>Calcul et correction</th>
-                <th>Résultat</th>
-                <th>Temps</th>
+                <th data-i18n="result.debriefColumnCalculation">Calcul et correction</th>
+                <th data-i18n="result.debriefColumnResult">Résultat</th>
+                <th data-i18n="leaderboard.columnTime">Temps</th>
               </tr>
             </thead>
             <tbody id="feedbackBody"></tbody>
@@ -327,28 +327,28 @@
         </div>
 
         <div class="name-block">
-          <label for="playerName">Prénom</label>
-          <input type="text" id="playerName" maxlength="30" autocomplete="given-name" placeholder="Votre prénom">
+          <label for="playerName" data-i18n="result.namePrompt">Prénom</label>
+          <input type="text" id="playerName" maxlength="30" autocomplete="given-name" data-i18n-placeholder="result.namePlaceholder">
           <p id="nameWarning" class="inline-message" aria-live="polite"></p>
         </div>
 
         <div id="saveStatus" class="inline-message save-status" aria-live="polite" hidden></div>
 
         <div class="result-actions">
-          <button class="btn btn-primary" data-action="restart">Nouvelle partie</button>
-          <button class="btn btn-secondary" data-action="save-home">Retourner à l’accueil</button>
+          <button class="btn btn-primary" data-action="restart" data-i18n="result.newGame">Nouvelle partie</button>
+          <button class="btn btn-secondary" data-action="save-home" data-i18n="result.backToHome">Retourner à l’accueil</button>
         </div>
 
-        <h3>Top 20 des scores</h3>
-        <div id="resultLeaderboardEmpty" class="empty-state" hidden>Aucun score enregistré pour le moment.</div>
+        <h3 data-i18n="leaderboard.top20">Top 20 des scores</h3>
+        <div id="resultLeaderboardEmpty" class="empty-state" hidden data-i18n="leaderboard.empty">Aucun score enregistré pour le moment.</div>
         <div class="table-scroll">
-          <table class="leaderboard-table" aria-label="Top 20 des scores">
+          <table class="leaderboard-table" data-i18n-aria-label="aria.top20Table">
             <thead>
               <tr>
-                <th>Prénom</th>
-                <th>Score</th>
-                <th>Temps</th>
-                <th data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)">À trou</th>
+                <th data-i18n="leaderboard.columnName">Prénom</th>
+                <th data-i18n="leaderboard.columnScore">Score</th>
+                <th data-i18n="leaderboard.columnTime">Temps</th>
+                <th data-i18n="leaderboard.columnHole" data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)" data-i18n-tooltip="tooltip.holeHeader">À trou</th>
                 <th id="resultLeaderboardDetailHeader">Tables utilisées</th>
               </tr>
             </thead>
@@ -361,27 +361,27 @@
     <section id="loginScreen" class="screen" aria-labelledby="loginTitle">
       <div class="panel narrow-panel">
         <div class="section-heading">
-          <span class="section-kicker">Espace personnel</span>
-          <h2 id="loginTitle">Connexion</h2>
+          <span class="section-kicker" data-i18n="auth.kicker">Espace personnel</span>
+          <h2 id="loginTitle" data-i18n="auth.loginTitle">Connexion</h2>
         </div>
-        <p class="muted">Accédez à votre historique et à vos statistiques.</p>
+        <p class="muted" data-i18n="auth.loginIntro">Accédez à votre historique et à vos statistiques.</p>
 
         <form id="loginForm" novalidate>
           <div class="form-field">
-            <label for="loginIdentifier">Nom d’utilisateur</label>
+            <label for="loginIdentifier" data-i18n="auth.loginLabel">Nom d’utilisateur</label>
             <input type="text" id="loginIdentifier" name="login" autocomplete="username"
-                   maxlength="40" required placeholder="Votre identifiant">
+                   maxlength="40" required placeholder="Votre identifiant" data-i18n-placeholder="auth.loginPlaceholder">
           </div>
           <div class="form-field">
-            <label for="loginPassword">Mot de passe</label>
+            <label for="loginPassword" data-i18n="auth.passwordLabel">Mot de passe</label>
             <input type="password" id="loginPassword" name="password" autocomplete="current-password"
-                   required placeholder="Votre mot de passe">
+                   required placeholder="Votre mot de passe" data-i18n-placeholder="auth.passwordPlaceholder">
           </div>
           <p id="loginFeedback" class="form-message" aria-live="polite"></p>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" id="loginSubmit">Se connecter</button>
-            <button type="button" class="btn btn-secondary" data-account-nav="register">Créer un compte</button>
-            <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+            <button type="submit" class="btn btn-primary" id="loginSubmit" data-i18n="auth.loginButton">Se connecter</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="register" data-i18n="auth.registerLink">Créer un compte</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="home" data-i18n="auth.backToHome">Retour à l’accueil</button>
           </div>
         </form>
       </div>
@@ -390,32 +390,32 @@
     <section id="registerScreen" class="screen" aria-labelledby="registerTitle">
       <div class="panel narrow-panel">
         <div class="section-heading">
-          <span class="section-kicker">Espace personnel</span>
-          <h2 id="registerTitle">Inscription</h2>
+          <span class="section-kicker" data-i18n="auth.kicker">Espace personnel</span>
+          <h2 id="registerTitle" data-i18n="auth.registerTitle">Inscription</h2>
         </div>
-        <p class="muted">Créez un compte pour conserver vos parties et vos statistiques.</p>
+        <p class="muted" data-i18n="auth.registerIntro">Créez un compte pour conserver vos parties et vos statistiques.</p>
 
         <form id="registerForm" novalidate>
           <div class="form-field">
-            <label for="registerLogin">Nom d’utilisateur (unique)</label>
+            <label for="registerLogin" data-i18n="auth.registerLoginLabel">Nom d’utilisateur (unique)</label>
             <input type="text" id="registerLogin" name="login" autocomplete="username"
-                   maxlength="40" required placeholder="3 à 40 caractères (lettres, chiffres, _)">
+                   maxlength="40" required placeholder="3 à 40 caractères (lettres, chiffres, _)" data-i18n-placeholder="auth.registerLoginPlaceholder">
           </div>
           <div class="form-field">
-            <label for="registerPassword">Mot de passe</label>
+            <label for="registerPassword" data-i18n="auth.passwordLabel">Mot de passe</label>
             <input type="password" id="registerPassword" name="password" autocomplete="new-password"
-                   minlength="10" required placeholder="10 caractères minimum">
+                   minlength="10" required placeholder="10 caractères minimum" data-i18n-placeholder="auth.registerPasswordPlaceholder">
           </div>
           <div class="form-field">
-            <label for="registerPasswordConfirm">Confirmation du mot de passe</label>
+            <label for="registerPasswordConfirm" data-i18n="auth.registerPasswordConfirmLabel">Confirmation du mot de passe</label>
             <input type="password" id="registerPasswordConfirm" name="password_confirm"
-                   autocomplete="new-password" minlength="10" required placeholder="Répétez le mot de passe">
+                   autocomplete="new-password" minlength="10" required placeholder="Répétez le mot de passe" data-i18n-placeholder="auth.registerPasswordConfirmPlaceholder">
           </div>
           <p id="registerFeedback" class="form-message" aria-live="polite"></p>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" id="registerSubmit">S’inscrire</button>
-            <button type="button" class="btn btn-secondary" data-account-nav="login">Déjà un compte ? Se connecter</button>
-            <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+            <button type="submit" class="btn btn-primary" id="registerSubmit" data-i18n="auth.registerButton">S’inscrire</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="login" data-i18n="auth.registerLoginLink">Déjà un compte ? Se connecter</button>
+            <button type="button" class="btn btn-secondary" data-account-nav="home" data-i18n="auth.backToHome">Retour à l’accueil</button>
           </div>
         </form>
       </div>
@@ -424,36 +424,36 @@
     <section id="accountScreen" class="screen" aria-labelledby="accountTitle">
       <div class="panel wide-panel">
         <div class="section-heading">
-          <span class="section-kicker">Espace personnel</span>
-          <h2 id="accountTitle">Mon compte</h2>
+          <span class="section-kicker" data-i18n="account.kicker">Espace personnel</span>
+          <h2 id="accountTitle" data-i18n="account.title">Mon compte</h2>
         </div>
         <div id="accountSummary" class="account-summary"></div>
 
-        <h3>Changer le mot de passe</h3>
+        <h3 data-i18n="account.changePassword">Changer le mot de passe</h3>
         <form id="passwordForm" class="account-form" novalidate>
           <div class="form-field">
-            <label for="oldPassword">Mot de passe actuel</label>
+            <label for="oldPassword" data-i18n="account.currentPassword">Mot de passe actuel</label>
             <input type="password" id="oldPassword" name="old_password" autocomplete="current-password" required>
           </div>
           <div class="form-field">
-            <label for="newPassword">Nouveau mot de passe</label>
+            <label for="newPassword" data-i18n="account.newPassword">Nouveau mot de passe</label>
             <input type="password" id="newPassword" name="new_password" autocomplete="new-password"
-                   minlength="10" required placeholder="10 caractères minimum">
+                   minlength="10" required placeholder="10 caractères minimum" data-i18n-placeholder="auth.registerPasswordPlaceholder">
           </div>
           <div class="form-field">
-            <label for="newPasswordConfirm">Confirmation du nouveau mot de passe</label>
+            <label for="newPasswordConfirm" data-i18n="account.confirmNewPassword">Confirmation du nouveau mot de passe</label>
             <input type="password" id="newPasswordConfirm" name="new_password_confirm"
                    autocomplete="new-password" minlength="10" required>
           </div>
           <p id="passwordFeedback" class="form-message" aria-live="polite"></p>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" id="passwordSubmit">Changer le mot de passe</button>
+            <button type="submit" class="btn btn-primary" id="passwordSubmit" data-i18n="account.changePasswordButton">Changer le mot de passe</button>
           </div>
         </form>
 
         <div class="form-actions">
-          <button type="button" class="btn btn-danger" data-account-logout>Se déconnecter</button>
-          <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+          <button type="button" class="btn btn-danger" data-account-logout data-i18n="account.logout">Se déconnecter</button>
+          <button type="button" class="btn btn-secondary" data-account-nav="home" data-i18n="auth.backToHome">Retour à l’accueil</button>
         </div>
       </div>
     </section>
@@ -461,22 +461,22 @@
     <section id="statsScreen" class="screen" aria-labelledby="statsTitle">
       <div class="panel wide-panel stats-panel">
         <div class="section-heading">
-          <span class="section-kicker">Mes performances</span>
-          <h2 id="statsTitle">Mes statistiques</h2>
+          <span class="section-kicker" data-i18n="stats.kicker">Mes performances</span>
+          <h2 id="statsTitle" data-i18n="stats.title">Mes statistiques</h2>
         </div>
 
-        <fieldset class="stats-mode-select" aria-label="Choisir le type de calcul">
-          <legend class="sr-only">Type de calcul</legend>
+        <fieldset class="stats-mode-select" aria-label="Choisir le type de calcul" data-i18n-aria-label="aria.selectCalcType">
+          <legend class="sr-only" data-i18n="stats.typeOfCalc">Type de calcul</legend>
           <button type="button" class="stats-mode-btn is-active" data-stats-mode="multiplication"
-                  aria-pressed="true">Multiplications</button>
+                  aria-pressed="true" data-i18n="common.multiplications">Multiplications</button>
           <button type="button" class="stats-mode-btn" data-stats-mode="addition"
-                  aria-pressed="false">Additions</button>
+                  aria-pressed="false" data-i18n="common.additions">Additions</button>
         </fieldset>
 
         <div id="statsContent" class="stats-content" aria-live="polite"></div>
 
         <div class="form-actions stats-actions">
-          <button type="button" class="btn btn-secondary" data-account-nav="account">Revenir à mon compte</button>
+          <button type="button" class="btn btn-secondary" data-account-nav="account" data-i18n="stats.backToAccount">Revenir à mon compte</button>
         </div>
       </div>
     </section>
@@ -484,10 +484,10 @@
     <section id="adminScreen" class="screen admin-screen" aria-labelledby="adminTitle">
       <div class="panel wide-panel">
         <div class="section-heading">
-          <span class="section-kicker">Espace réservé aux administrateurs</span>
-          <h2 id="adminTitle">Administration</h2>
+          <span class="section-kicker" data-i18n="admin.kicker">Espace réservé aux administrateurs</span>
+          <h2 id="adminTitle" data-i18n="admin.title">Administration</h2>
         </div>
-        <p class="muted">Vue d’ensemble de la plateforme et gestion des comptes utilisateurs.</p>
+        <p class="muted" data-i18n="admin.intro">Vue d’ensemble de la plateforme et gestion des comptes utilisateurs.</p>
 
         <!-- Tableau de bord : statistiques globales -->
         <div id="adminStats" class="admin-block" aria-live="polite"></div>
@@ -495,12 +495,13 @@
         <!-- Gestion des comptes -->
         <div class="admin-block">
           <div class="admin-section-head">
-            <h3>Comptes</h3>
+            <h3 data-i18n="admin.accounts">Comptes</h3>
             <div class="admin-search">
-              <label class="sr-only" for="adminSearchInput">Rechercher un compte</label>
+              <label class="sr-only" for="adminSearchInput" data-i18n="admin.searchAccountLabel">Rechercher un compte</label>
               <input type="search" id="adminSearchInput" placeholder="Rechercher par identifiant…"
+                     data-i18n-placeholder="admin.searchPlaceholder"
                      autocomplete="off" maxlength="40">
-              <button type="button" class="btn btn-secondary btn-small" id="adminSearchBtn">Rechercher</button>
+              <button type="button" class="btn btn-secondary btn-small" id="adminSearchBtn" data-i18n="admin.searchButton">Rechercher</button>
             </div>
           </div>
           <div id="adminUserList" class="admin-userlist" aria-live="polite"></div>
@@ -508,7 +509,7 @@
 
         <!-- Liste des actions sensibles (confirmations) -->
         <div class="form-actions">
-          <button type="button" class="btn btn-secondary" data-account-nav="home">Retour à l’accueil</button>
+          <button type="button" class="btn btn-secondary" data-account-nav="home" data-i18n="common.backToHome">Retour à l’accueil</button>
         </div>
       </div>
     </section>
@@ -517,6 +518,7 @@
   <div id="accountToast" class="account-toast" role="status" aria-live="polite" hidden></div>
 
   <script src="guest-history.js"></script>
+  <script src="i18n.js"></script>
   <script src="adaptive-generator.js"></script>
   <script src="app.js"></script>
   <script src="vendor/chart.js/chart.umd.min.js"></script>

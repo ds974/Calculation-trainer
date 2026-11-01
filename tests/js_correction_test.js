@@ -170,10 +170,15 @@ if (!source || source.length === 0) {
         doubleDispOk,
         ""
       );
+      // Le feedback est rendu via le moteur i18n : après erreur / temps écoulé il
+      // n'affiche qu'un message court localisé (mission.timeout / mission.incorrect),
+      // tandis que la bonne réponse est révélée dans la zone de question
+      // (questionCorrectionHTML). L'assertion fonctionnelle « message court » est
+      // préservée : on vérifie l'affectation unique d'un libellé court via i18nT.
       var feedbackShort =
-        /feedback\.textContent\s*=\s*timedOut\s*\?\s*["']Temps écoulé["']\s*:\s*["']Réponse incorrecte["']/.test(source);
+        /feedback\.textContent\s*=\s*timedOut\s*\?\s*i18nT\(["']mission\.timeout["']/.test(source);
       check(
-        "le feedback de correction n'affiche qu'un message court (sans répéter la réponse)",
+        "le feedback de correction n'affiche qu'un message court localisé (sans répéter la réponse)",
         feedbackShort && source.indexOf("→ ${expectedAnswer}") === -1,
         ""
       );

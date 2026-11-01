@@ -114,14 +114,15 @@ final class Database
 
         // Utilisation de guillemets doubles PHP pour éviter d'échapper les apostrophes SQL.
         $pdo->exec("CREATE TABLE IF NOT EXISTS users (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                login         TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                email         TEXT,
-                password_hash TEXT NOT NULL,
-                role          TEXT NOT NULL DEFAULT 'user'
-                              CHECK (role IN ('user', 'admin')),
-                created_at    TEXT NOT NULL
-                              DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                login              TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email              TEXT,
+                password_hash      TEXT NOT NULL,
+                role               TEXT NOT NULL DEFAULT 'user'
+                                   CHECK (role IN ('user', 'admin')),
+                preferred_language TEXT NOT NULL DEFAULT 'fr',
+                created_at         TEXT NOT NULL
+                                   DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS results (
@@ -173,6 +174,13 @@ final class Database
         }
         if (is_array($usersCols) && !in_array('last_login_at', $usersCols, true)) {
             $pdo->exec('ALTER TABLE users ADD COLUMN last_login_at TEXT');
+        }
+
+        // --- Migration v12.6-C1 (idempotente, non destructive) : préférence linguistique.
+        // Ajoute la colonne preferred_language aux bases créées avant v12.6-C1.
+        // Valeur par défaut 'fr' pour les comptes existants ; aucune donnée ne change.
+        if (is_array($usersCols) && !in_array('preferred_language', $usersCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN preferred_language TEXT NOT NULL DEFAULT 'fr'");
         }
 
         // Table de limitation des tentatives de connexion (anti brute-force).
