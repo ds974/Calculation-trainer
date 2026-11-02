@@ -504,6 +504,32 @@
               <button type="button" class="btn btn-secondary btn-small" id="adminSearchBtn" data-i18n="admin.searchButton">Rechercher</button>
             </div>
           </div>
+
+          <!-- Légende des actions administratives (P3) : repliée par défaut,
+               ouvrable/fermable au clavier via l'élément <details> natif. L'état
+               ouvert/fermé est conservé même après un changement de langue (couche
+               statique, non reconstruite par reRender). Les libellés sont traduits
+               en 4 langues via data-i18n (applyToDom met à jour la légende ouverte). -->
+          <details class="admin-legend" id="adminActionsLegend">
+            <summary class="admin-legend-summary">
+              <span class="admin-legend-toggle-icon" aria-hidden="true">
+                <img src="assets/icons/circle-help.svg" alt="" width="20" height="20" decoding="async">
+              </span>
+              <span data-i18n="admin.actionsLegend">Légende des actions</span>
+            </summary>
+            <div class="admin-legend-body">
+              <ul class="admin-legend-list">
+                <li><span class="admin-act-icon" data-icon="eye" aria-hidden="true"></span><span data-i18n="admin.legendConsult">Consulter un compte</span></li>
+                <li><span class="admin-act-icon" data-icon="user-x" aria-hidden="true"></span><span data-i18n="admin.legendDeactivate">Désactiver un compte</span></li>
+                <li><span class="admin-act-icon" data-icon="user-check" aria-hidden="true"></span><span data-i18n="admin.legendReactivate">Réactiver un compte</span></li>
+                <li><span class="admin-act-icon" data-icon="shield-plus" aria-hidden="true"></span><span data-i18n="admin.legendPromote">Accorder le rôle administrateur</span></li>
+                <li><span class="admin-act-icon" data-icon="shield-minus" aria-hidden="true"></span><span data-i18n="admin.legendDemote">Retirer le rôle administrateur</span></li>
+                <li><span class="admin-act-icon" data-icon="key-round" aria-hidden="true"></span><span data-i18n="admin.legendReset">Réinitialiser le mot de passe</span></li>
+              </ul>
+              <p class="admin-legend-locknote" data-i18n="admin.lockedActionExplanation">Un cadenas indique une action interdite pour ce compte.</p>
+            </div>
+          </details>
+
           <div id="adminUserList" class="admin-userlist" aria-live="polite"></div>
         </div>
 

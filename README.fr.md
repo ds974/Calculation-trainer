@@ -192,6 +192,8 @@ Auteur : **Didier SEBASTIEN**
 
 © Didier SEBASTIEN — 2026 · v12
 
+« Les icônes d'administration sont basées sur Lucide (licence ISC, et MIT pour certaines icônes issues de Feather). Certaines ont été modifiées. Voir `public/assets/icons/LICENSE-LUCIDE.txt`. »
+
 Ce dépôt ne distribue actuellement **aucun fichier de licence** open source. Aucune licence
 n'est implicite ; merci de contacter l'auteur avant de réutiliser d'importantes parties du code.
 

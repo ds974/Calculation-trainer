@@ -1482,43 +1482,121 @@ input[type="password"] {
 
 /* Tableau des comptes */
 .admin-table { min-width: 720px; }
-.admin-table th:last-child,
+.admin-table th:last-child { text-align: center; }
 .admin-table td:last-child { text-align: right; }
-.admin-table .admin-actions { white-space: nowrap; text-align: right; }
-.admin-table .admin-actions .btn { margin-left: 6px; }
-.admin-actions .btn:first-child { margin-left: 0; }
+/* Date compacte sur une seule ligne (colonne « Créé le ») */
+.admin-table td.admin-date { white-space: nowrap; }
+/* Colonne Actions : le <td> reste une cellule de tableau normale ; les boutons
+   sont placés dans un conteneur interne flex (admin-actions-group). Le conteneur
+   étant block-level (occupe toute la largeur de la cellule, égale à celle de la
+   colonne et donc de l'en-tête), justify-content:center aligne le centre du
+   groupe sur le centre de l'en-tête « Actions », pour toutes les lignes, y
+   compris celles aux boutons désactivés. La colonne suit la largeur réelle du
+   contenu (table-layout auto). */
+.admin-table .admin-actions { text-align: left; }
+.admin-table .admin-actions-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.admin-table .admin-actions .btn { margin: 0; }
 .admin-table .admin-actions .btn-small { min-width: 0; }
 .admin-self { font-size: .78rem; color: var(--muted); font-weight: 600; }
 
-/* Boutons désactivés (protection visuelle du dernier administrateur actif) */
+/* P3 — Boutons d'action à icône (compacts) : restaurent un bouton carré/légèrement
+   arrondi. Fond bleu-gris actif + icône blanche ; états hover/focus visibles ; et,
+   pour les actions INTERDITES (dernier admin), fond gris clair + contour gris +
+   pictogramme gris foncé grâce aux règles .btn:disabled existantes ci-dessous.
+   La couleur de l'icône est pilotée par currentColor (aucun texte codé en dur). */
+.admin-table .admin-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.admin-table .admin-actions-group { gap: 6px; }
+.admin-table .admin-act:not(:disabled) { color: #fff; }
+.admin-table .admin-act:hover { transform: translateY(-1px); }
+.admin-table .admin-act:not(:disabled):hover { background: var(--secondary-hover); }
+.admin-table .admin-act:not(:disabled):focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+/* Icônes SVG locales rendues en MASQUE CSS (CSS mask) : le SVG reste inchangé et
+   local, sans script ni référence externe ; seule son alpha modèle le repérage,
+   la couleur étant fournie par background currentColor. --act-mask contient l'URL
+   locale de chaque pictogramme (actif ou verrouillé). */
+.admin-act-icon {
+  display: inline-block;
+  flex: none;
+  width: 20px; height: 20px;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-image: var(--act-mask, none); mask-image: var(--act-mask, none);
+}
+[data-icon="eye"]             { --act-mask: url(assets/icons/eye.svg); }
+[data-icon="user-x"]          { --act-mask: url(assets/icons/user-x.svg); }
+[data-icon="user-check"]      { --act-mask: url(assets/icons/user-check.svg); }
+[data-icon="shield-plus"]     { --act-mask: url(assets/icons/shield-plus.svg); }
+[data-icon="shield-minus"]    { --act-mask: url(assets/icons/shield-minus.svg); }
+[data-icon="key-round"]       { --act-mask: url(assets/icons/key-round.svg); }
+[data-icon="user-x-locked"]   { --act-mask: url(assets/icons/user-x-locked.svg); }
+[data-icon="shield-minus-locked"] { --act-mask: url(assets/icons/shield-minus-locked.svg); }
+
+/* P3 — Légende interactive des actions (détail <details> fermé par défaut). */
+.admin-legend {
+  margin: 2px 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong, #f0f4f4);
+}
+.admin-legend-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer; list-style: none;
+  font-weight: 700; color: var(--text);
+  user-select: none;
+}
+.admin-legend-summary::-webkit-details-marker { display: none; }
+.admin-legend-toggle-icon { display: inline-flex; flex: none; }
+.admin-legend-body { padding: 2px 14px 12px; }
+.admin-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.admin-legend-list li { display: flex; align-items: center; gap: 10px; }
+.admin-legend-list .admin-act-icon { color: var(--secondary); }
+.admin-legend-locknote { margin: 12px 0 0; font-size: .85rem; color: var(--muted); }
+
+/* Tactile : touches de 44 px sur petit écran, légende toujours lisible. */
+@media (max-width: 650px) {
+  .admin-table .admin-act { width: 44px; height: 44px; }
+  .admin-legend-summary { flex-wrap: wrap; }
+}
+
+/* Boutons désactivés (protection visuelle du dernier administrateur actif) :
+   restent identifiables comme des boutons (fond très clair + bordure grise
+   visible mais discrète + texte atténué), sans effet de survol activable. */
 .admin-actions .btn:disabled {
-  opacity: .5;
+  opacity: .8;
   cursor: not-allowed;
-  background: #e9ecef;
-  border-color: #d5dbe1;
-  color: var(--muted);
+  background: #eef0f2;
+  border: 1px solid #aeb6bd;
+  color: #7c858c;
   box-shadow: none;
 }
-.admin-actions .btn:disabled:hover { background: #e9ecef; color: var(--muted); }
-
-/* Note explicative du dernier administrateur actif (accessible au clavier) */
-.admin-last-admin-note {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 5px 10px;
-  font-size: .76rem;
-  font-weight: 650;
-  line-height: 1.35;
-  color: #8a4b0f;
-  background: #fdf3e3;
-  border: 1px solid #f0d9ae;
-  border-radius: 8px;
-  cursor: help;
-  outline-offset: 2px;
-}
-.admin-last-admin-note:focus-visible {
-  outline: 2px solid #d2a34b;
-  outline-offset: 2px;
+.admin-actions .btn:disabled:hover,
+.admin-actions .btn:disabled:focus {
+  background: #eef0f2;
+  border-color: #aeb6bd;
+  color: #7c858c;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 /* Panneau de détail d'un compte */
@@ -1607,9 +1685,8 @@ input[type="password"] {
   .admin-search input[type="search"] { flex: 1; min-width: 0; }
   .admin-section-head { flex-direction: column; align-items: stretch; }
   .admin-table .admin-actions { text-align: left; }
-  .admin-table .admin-actions .btn { width: auto; margin: 0 0 6px 0; }
+  .admin-table .admin-actions-group { gap: 8px 6px; }
   .admin-table .admin-actions .btn-small { font-size: .78rem; padding: 6px 10px; }
-  .admin-last-admin-note { display: block; margin: 2px 0 0; max-width: 100%; }
   .admin-detail { padding: 14px 14px; }
   .admin-detail-grid { grid-template-columns: 1fr; }
 }

@@ -271,6 +271,39 @@ const StatsUI = (() => {
     charts.push(chart);
   }
 
+  /**
+   * Libellé à afficher pour l'indice `index` de l'axe horizontal de
+   * l'histogramme journalier (v12.7-P1).
+   *
+   * Chart.js fournit un tick par indice ; on ne veut PAS les afficher tous
+   * (surcharge visuelle), mais on doit GARANTIR la présence du dernier jour
+   * (aujourd'hui), même si sa valeur est nulle. On échantillonne donc les
+   * graduations intermédiaires (une tous les `step` jours, comme avant :
+   * ~12 libellés sur 30) et l'on force toujours le dernier indice.
+   *
+   * Les indices hors périmètre et les indices non échantillonnés (hors dernier)
+   * renvoient une chaîne vide : le tick existe mais ne produit aucun libellé.
+   *
+   * La date est restituée via `formatDay` (jour calendaire de La Réunion déjà
+   * exprimé en « YYYY-MM-DD »), donc la présentation suit la langue courante
+   * SANS modifier le jour de référence ni le regroupement.
+   *
+   * @param {Array<{day:string,games:number}>|null} daily données journalières.
+   * @param {number} index indice de tick (0..n-1).
+   * @return {string} libellé à afficher, ou "" si aucun.
+   */
+  function dailyLabelForIndex(daily, index) {
+    const rows = daily || [];
+    const n = rows.length;
+    if (index < 0 || index >= n) return "";
+    const isLast = index === n - 1;
+    // Une graduation intermédiaire tous les 3 jours (≈ 11-12 libellés sur 30).
+    const step = 3;
+    if (!isLast && index % step !== 0) return "";
+    const row = rows[index];
+    return row ? formatDay(row.day) || String(row.day) : "";
+  }
+
   function buildDailyChart(canvas, daily) {
     const factory = chartFactory();
     if (!factory) return;
@@ -316,7 +349,18 @@ const StatsUI = (() => {
             title: { display: true, text: i18nT("stats.gamesPlayed", null, "Parties") },
           },
           x: {
-            ticks: { color: colors.text, maxTicksLimit: 12, autoSkip: true, maxRotation: 60 },
+            // v12.7-P1 : `autoSkip` est désactivé pour garantir que TOUS les
+            // ticks parviennent jusqu'au callback (Chart.js v4 ne conserve pas
+            // forcément le dernier tick durant l'échantillonnage autoSkip).
+            // On pilote donc nous-mêmes les libellés : graduations
+            // intermédiaires espacées + dernier jour (aujourd'hui) TOUJOURS
+            // affiché, même à zéro (cf. dailyLabelForIndex).
+            ticks: {
+              color: colors.text,
+              autoSkip: false,
+              maxRotation: 60,
+              callback: (index) => dailyLabelForIndex((daily || []), index),
+            },
             grid: { display: false },
           },
         },
@@ -742,6 +786,7 @@ const StatsUI = (() => {
       sortedDifficultyList,
       difficultyLabels,
       DIFF_STATUS_ORDER,
+      dailyLabelForIndex,
     },
   };
 })();

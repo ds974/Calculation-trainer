@@ -232,6 +232,8 @@ Author: **Didier SEBASTIEN**
 
 © Didier SEBASTIEN — 2026 · v12
 
+Administration icons are based on Lucide, licensed under ISC, with MIT licensing for applicable Feather-derived icons. Some icons have been modified. See `public/assets/icons/LICENSE-LUCIDE.txt`.
+
 This repository does **not** currently distribute an open-source license file. No license is
 implied; please contact the author before reusing significant portions of the code.
 

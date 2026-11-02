@@ -54,6 +54,43 @@ const AdminUI = (() => {
     }
   }
 
+  /** Date numérique COMPACTE sur une ligne (tableau des comptes uniquement).
+   *  Passe par le moteur i18n / Intl.DateTimeFormat de la langue active : le
+   *  format suit la locale (ex. en -> 11/01/2026, zh -> 2026/11/01), sans
+   *  modifier la date réelle ni le fuseau. N'affecte PAS formatDate() utilisé
+   *  par les autres écrans (fiche compte, etc.). */
+  function formatDateCompact(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    const I = window && window.I18N;
+    try {
+      const opts = { day: "2-digit", month: "2-digit", year: "numeric" };
+      const fmt = (I && typeof I.formatDate === "function")
+        ? I.formatDate(d, opts)
+        : new Intl.DateTimeFormat("fr-FR", opts).format(d);
+      if (typeof fmt === "string" && fmt.trim() !== "") return fmt;
+    } catch (_e2) { /* repli ci-dessous */ }
+    return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  }
+
+  /** Construit un bouton d'action ADMINISTRATIF compact à icône (P3).
+   *  Le texte visible est remplacé par une icône SVG locale rendue en masque
+   *  CSS (CSS mask, remplissage via currentColor) : la couleur active / désactivée
+   *  est ainsi contrôlée par le CSS, sans modifier les tracés SVG. Le nom
+   *  accessible (aria-label) et l'info-bulle (title) portent la traduction.
+   *  Pour les actions INTERDITES (opts.disabled), le `title` vient du bloc
+   *  `disabled` passé dans attrs (explication du dernier admin) ; on n'ajoute
+   *  donc pas de second `title`. Les boutons restent réellement disabled :
+   *  jamais remplacés par un simple aria-disabled. */
+  function actIconButton(label, icon, attrs, opts) {
+    opts = opts || {};
+    var tip = opts.disabled ? "" : ' title="' + escapeHtml(label) + '"';
+    return '<button type="button" class="btn btn-secondary btn-small admin-act"' +
+      attrs + tip + ' aria-label="' + escapeHtml(label) + '">' +
+      '<span class="admin-act-icon" data-icon="' + icon + '"></span></button>';
+  }
+
   function isAdmin() {
     return typeof window.AccountUI !== "undefined" && typeof window.AccountUI.isAdmin === "function"
       ? window.AccountUI.isAdmin()
@@ -269,43 +306,50 @@ const AdminUI = (() => {
       const isLastActiveAdmin = u.role === "admin" && u.is_active === true && activeAdmins === 1;
 
       // Consulter reste toujours disponible.
-      let actions =
-        '<button type="button" class="btn btn-secondary btn-small" data-admin-view="' + u.id + '">' +
-        escapeHtml(t("admin.consult", null, "Consulter")) + "</button>";
+      let actions = actIconButton(t("admin.consult", null, "Consulter"), "eye", ' data-admin-view="' + u.id + '"');
 
       if (isLastActiveAdmin) {
         // Les deux actions interdites sont désactivées (visuellement et fonctionnellement).
-        // La note visible décrit la raison, et est atteignable au clavier (tabindex) :
-        // elle ne dépend pas uniquement de l'infobulle title d'un bouton désactivé
-        // (que Firefox n'affiche d'ailleurs pas pour un élément disabled).
+        // Aucun message permanent n'est affiché dans la ligne. L'explication reste
+        // disponible aux technologies d'assistance via un texte masqué visuellement
+        // (classe .sr-only) référencé par aria-describedby, et via l'info-bulle
+        // « title » sur ordinateur. Les boutons restent réellement disabled :
+        // on ne remplace jamais disabled par un simple aria-disabled.
         const noteId = "lastAdminNote-" + u.id;
         const lastNote = t("admin.lastActiveAdminNote", null, "Impossible : ce compte est le dernier administrateur actif.");
         const disabledBtn = ' disabled aria-disabled="true" title="' + escapeHtml(lastNote) + '" aria-describedby="' + noteId + '"';
         actions +=
-          '<button type="button" class="btn btn-secondary btn-small"' + disabledBtn + ' data-admin-active="' + u.id + '" data-active="0">' +
-          escapeHtml(t("admin.deactivate", null, "Désactiver")) + "</button>" +
-          '<button type="button" class="btn btn-secondary btn-small"' + disabledBtn + ' data-admin-role="' + u.id + '" data-makeadmin="0">' +
-          escapeHtml(t("admin.demote", null, "Rétrograder")) + "</button>";
+          actIconButton(t("admin.deactivate", null, "Désactiver"), "user-x-locked",
+            disabledBtn + ' data-admin-active="' + u.id + '" data-active="0"', { disabled: true }) +
+          actIconButton(t("admin.demote", null, "Rétrograder"), "shield-minus-locked",
+            disabledBtn + ' data-admin-role="' + u.id + '" data-makeadmin="0"', { disabled: true });
+        // Description accessible (masquée visuellement via .sr-only), référencée
+        // par aria-describedby : aucune perte d'info pour les lecteurs d'écran,
+        // sans message permanent visible dans la ligne ni sur smartphone.
         actions +=
-          '<span class="admin-last-admin-note" id="' + noteId + '" role="note" tabindex="0">' +
-          escapeHtml(lastNote) + "</span>";
+          '<span class="sr-only" id="' + noteId + '">' + escapeHtml(lastNote) + "</span>";
       } else {
+        const actKey = u.is_active ? "deactivate" : "reactivate";
+        const actIcon = u.is_active ? "user-x" : "user-check";
+        const roleKey = u.role === "admin" ? "demote" : "promoteAdmin";
+        const roleIcon = u.role === "admin" ? "shield-minus" : "shield-plus";
         actions +=
-          '<button type="button" class="btn btn-secondary btn-small" data-admin-active="' + u.id + '" data-active="' + (u.is_active ? "0" : "1") + '">' +
-          escapeHtml(u.is_active ? t("admin.deactivate", null, "Désactiver") : t("admin.reactivate", null, "Réactiver")) + "</button>" +
-          '<button type="button" class="btn btn-secondary btn-small" data-admin-role="' + u.id + '" data-makeadmin="' + (u.role === "admin" ? "0" : "1") + '">' +
-          escapeHtml(u.role === "admin" ? t("admin.demote", null, "Rétrograder") : t("admin.promoteAdmin", null, "Promouvoir admin")) + "</button>";
+          actIconButton(t("admin." + actKey, null, ""), actIcon,
+            ' data-admin-active="' + u.id + '" data-active="' + (u.is_active ? "0" : "1") + '"') +
+          actIconButton(t("admin." + roleKey, null, ""), roleIcon,
+            ' data-admin-role="' + u.id + '" data-makeadmin="' + (u.role === "admin" ? "0" : "1") + '"');
       }
       actions +=
-        '<button type="button" class="btn btn-secondary btn-small" data-admin-reset="' + u.id + '">' +
-        escapeHtml(t("admin.resetPassword", null, "Reset mot de passe")) + "</button>";
+        actIconButton(t("admin.resetPassword", null, "Reset mot de passe"), "key-round", ' data-admin-reset="' + u.id + '"');
       rows +=
         "<tr>" +
         "<td><strong>" + escapeHtml(u.login) + "</strong>" + (self ? ' <span class="admin-self">' + escapeHtml(t("admin.you", null, "(vous)")) + "</span>" : "") + "</td>" +
         "<td>" + badge(roleTxt, roleKind) + "</td>" +
         "<td>" + badge(activeTxt, activeKind) + "</td>" +
-        "<td>" + formatDate(u.created_at) + "</td>" +
-        "<td class=\"admin-actions\">" + actions + "</td>" +
+        "<td class=\"admin-date\">" + formatDateCompact(u.created_at) + "</td>" +
+        "<td class=\"admin-actions\">" +
+          '<div class="admin-actions-group">' + actions + "</div>" +
+        "</td>" +
         "</tr>";
     }
 
@@ -594,9 +638,11 @@ const AdminUI = (() => {
     __test: {
       t,
       formatDate,
+      formatDateCompact,
       escapeHtml,
       reRender,
       applyStaticAdminLabels,
+      actIconButton,
     },
   };
 })();

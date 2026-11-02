@@ -81,6 +81,7 @@ final class TestRunner
         $this->testStatsAggregation();
         $this->testStatsIsolation();
         $this->testStatsReunionTimezone();
+        $this->testStatsDailyCurrentDay();
         $this->testStatsInvalidMode();
         $this->testStatsIncludesImported();
 
@@ -1358,6 +1359,62 @@ final class TestRunner
             $this->check(($byDay['2026-10-26'] ?? 0) === 0, 'Aucune partie attribuée au 2026-10-26 (basculée au lendemain)');
         } catch (Throwable $e) {
             $this->check(false, "Statistiques fuseau : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape 6 : journée courante de l'histogramme (v12.7-P1).
+    // La dernière entrée (daily_games[29]) doit représenter AUJOURD'HUI dans le
+    // fuseau Indian/Reunion, avec `games` = nombre réel de parties du jour
+    // (0 si aucune), quelle que soit l'heure (jour en cours non terminé).
+    // La date de référence est INJECTÉE (jamais l'horloge réelle), ce qui rend
+    // le test déterministe pour les changements de mois et d'année.
+
+    private function testStatsDailyCurrentDay(): void
+    {
+        echo "[Statistiques — journée courante de l'histogramme]\n";
+        try {
+            // Cas A : aujourd'hui à 0 partie (1er nov 2026).
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $resultRepository = new ResultRepository($pdo);
+            $results = new ResultService($pdo, $resultRepository);
+            $stats = new StatsService($resultRepository);
+            $id = $repo->create(['login' => 'stats_curday', 'password' => 'motdepasse10', 'role' => 'user']);
+
+            // Quelques parties les jours précédents, aucune aujourd'hui.
+            $results->save($id, 'multiplication', 8, '2026-10-31T10:00:00Z');
+            $results->save($id, 'multiplication', 7, '2026-10-30T10:00:00Z');
+
+            // `now` = 1er nov 2026 à 14:27 heure Reunion (heure non finie).
+            $now = new DateTimeImmutable('2026-11-01T10:27:00Z');
+            $s = $stats->stats($id, 'multiplication', $now);
+            $d = $s['daily_games'];
+            $this->check(count($d) === 30, 'Journée courante : 30 journées générées');
+            $this->check(($d[0]['day'] ?? '') === '2026-10-03', 'Journée courante : première journée J-29 = 03/10');
+            $this->check(($d[29]['day'] ?? '') === '2026-11-01', 'Journée courante : dernière entrée = 01/11 (aujourd\'hui)');
+            $this->check(($d[29]['games'] ?? -1) === 0, 'Journée courante : aucune partie aujourd\'hui => daily_games[29].games === 0');
+
+            // Cas B : trois parties aujourd'hui => daily_games[29].games === 3.
+            $results->save($id, 'multiplication', 5, '2026-11-01T05:00:00Z');
+            $results->save($id, 'multiplication', 6, '2026-11-01T06:00:00Z');
+            $results->save($id, 'multiplication', 7, '2026-11-01T07:30:00Z');
+            $s2 = $stats->stats($id, 'multiplication', $now);
+            $d2 = $s2['daily_games'];
+            $this->check(($d2[29]['games'] ?? -1) === 3, 'Journée courante : 3 parties aujourd\'hui => daily_games[29].games === 3');
+            $this->check(count($d2) === 30, 'Journée courante : toujours 30 journées après parties du jour');
+
+            // Cas C : déterministe sur un changement de mois ET d'année (janvier).
+            $id2 = $repo->create(['login' => 'stats_curday2', 'password' => 'motdepasse10', 'role' => 'user']);
+            $nowY = new DateTimeImmutable('2026-01-05T10:00:00Z'); // aujourd'hui = 05/01/2026 Reunion
+            $sY = $stats->stats($id2, 'multiplication', $nowY);
+            $dY = $sY['daily_games'];
+            $this->check(count($dY) === 30, 'Changement d\'année : 30 journées');
+            $this->check(($dY[0]['day'] ?? '') === '2025-12-07', 'Changement d\'année : J-29 = 07/12/2025');
+            $this->check(($dY[29]['day'] ?? '') === '2026-01-05', 'Changement d\'année : dernière = 05/01/2026 (aujourd\'hui)');
+            $this->check(($dY[29]['games'] ?? -1) === 0, 'Changement d\'année : aucune partie => dernières valeur 0');
+        } catch (Throwable $e) {
+            $this->check(false, "Statistiques journée courante : {$e->getMessage()}");
         }
     }
 

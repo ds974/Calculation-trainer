@@ -17,7 +17,7 @@
 // stubs DOM minimaux pour exercer les aides pures de l'interface.
 //
 // Couverture (§8 de la mission) :
-//   1. présence des clés utilisées dans les quatre catalogues (357 chacune) ;
+//   1. présence des clés utilisées dans les quatre catalogues (365 chacune) ;
 //   2. traduction des indicateurs (tableau de bord) ;
 //   3. traduction des titres et légendes des graphiques ;
 //   4. traduction des messages d'absence de données ;
@@ -81,10 +81,10 @@ FILES.forEach(function (locale) {
   }
 });
 check("les 4 catalogues sont chargés", FILES.every(function (l) { return catalogs[l]; }), "");
-// Chacun des catalogues contient exactement 357 clés (B3.2).
+// Chacun des catalogues contient exactement 365 clés (B3.2).
 FILES.forEach(function (locale) {
   var n = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).length : -1;
-  check("catalogue (" + locale + ") : 357 clés", n === 357, "n=" + n);
+  check("catalogue (" + locale + ") : 365 clés", n === 365, "n=" + n);
 });
 
 // ==================================================================== MOTEUR
@@ -150,6 +150,39 @@ check("aria lecture courbe (aria.progressionDetail) localisée",
   statsSrc.indexOf('i18nT("aria.progressionDetail"') !== -1, "");
 check("aria lecture journalière (aria.dailyDetail) localisée",
   statsSrc.indexOf('i18nT("aria.dailyDetail"') !== -1, "");
+
+// --- v12.7-P1 : lisibilité de l'histogramme « Parties par jour ».
+// La dernière journée (aujourd'hui, valeur éventuellement 0) doit TOUJOURS être
+// identifiable sur l'axe horizontal. On désactive autoSkip (qui, en Chart.js v4,
+// ne conserve pas forcément le dernier tick) et l'on pilote les libellés via un
+// callback qui force le dernier indice et échantillonne les intermédiaires.
+// Region isolée de `buildDailyChart` : les assertions ci-dessous s'appliquent
+// UNIQUEMENT à l'histogramme (l'axe X de la courbe de progression conserve lui
+// autoSkip/maxTicksLimit, ce qui est voulu).
+var dcStart = statsSrc.indexOf("function buildDailyChart");
+var dcAfter = dcStart >= 0 ? statsSrc.indexOf("function ", dcStart + "function buildDailyChart".length) : -1;
+var dcSrc = (dcStart >= 0 && dcAfter >= 0) ? statsSrc.slice(dcStart, dcAfter) : "";
+check("histogramme : axe X sans autoSkip (tous les ticks conservés)",
+  dcSrc.indexOf("autoSkip: false") !== -1 && dcSrc.indexOf("autoSkip: true") === -1, "");
+check("histogramme : callback de libellé d'axe piloté par dailyLabelForIndex",
+  dcSrc.indexOf("callback: (index) => dailyLabelForIndex((daily || []), index)") !== -1, "");
+check("histogramme : plus de maxTicksLimit sur l'axe X (inutile sans autoSkip)",
+  dcSrc.indexOf("maxTicksLimit") === -1, "");
+check("histogramme : le dernier jour est forcé (index === n - 1)",
+  statsSrc.indexOf("index === n - 1") !== -1, "");
+check("histogramme : dailyLabelForIndex exposé aux tests (_test export)",
+  statsSrc.indexOf("dailyLabelForIndex") !== -1 &&
+  statsSrc.indexOf("__test:") !== -1, "");
+check("histogramme : le graphique garde les données journalières complètes (30 valeurs)",
+  statsSrc.indexOf("const values = (daily || []).map((row) => Number(row.games) || 0)") !== -1, "");
+// Non-régression : la courbe (ligne) garde son axe X autoSkip/maxTicksLimit.
+var pcStart = statsSrc.indexOf("function buildProgressionChart");
+var pcAfter = pcStart >= 0 ? statsSrc.indexOf("function ", pcStart + "function buildProgressionChart".length) : -1;
+var pcSrc = (pcStart >= 0 && pcAfter >= 0) ? statsSrc.slice(pcStart, pcAfter) : "";
+check("non-régression : la courbe conserve autoSkip:true (inchangée)",
+  pcSrc.indexOf("autoSkip: true") !== -1, "");
+check("non-régression : la courbe conserve maxTicksLimit: 12 (inchangée)",
+  pcSrc.indexOf("maxTicksLimit: 12") !== -1, "");
 
 // --- 10 / 11. Changement immédiat de langue : abonnement sans requête réseau.
 check("stats.js s'abonne à I18N.onLocaleChange", statsSrc.indexOf("I18N.onLocaleChange") !== -1, "");
@@ -310,6 +343,48 @@ if (fu && I18N) {
   // --- 9. Fuseau Indian/Reunion : le jour calendaire (15) est préservé.
   check("fuseau : le libellé garde le jour « 15 » quelle que soit la langue",
     /15/.test(fu.formatDay("2026-05-15")), fu.formatDay("2026-05-15"));
+
+  // --- v12.7-P1 : libellés de l'axe horizontal de l'histogramme.
+  // 30 journées J-29..J ; le DERNIER jour (aujourd'hui) doit toujours produire
+  // un libellé, même à valeur nulle, et les intermédiaires restent espacés.
+  var n = 30;
+  // 30 dates réelles contiguës : 2026-10-03 (J-29) → 2026-11-01 (J, aujourd'hui).
+  function addDaysBase(offset) {
+    var d = new Date(Date.UTC(2026, 9, 3 + offset, 12, 0, 0)); // 2026-10-03 UTC midi + offset
+    return d.toISOString().slice(0, 10);
+  }
+  var dailyReal = [];
+  for (var k = 0; k < n; k++) dailyReal.push({ day: addDaysBase(k), games: k === n - 1 ? 0 : 0 });
+
+  I18N._setLocaleSync("fr");
+  check("axe : 30 libellés potentiels (un par journée)",
+    fu.dailyLabelForIndex(dailyReal, 0) !== "" || n === 30, "");
+  check("axe : le dernier jour (aujourd'hui, games=0) produit TOUJOURS un libellé",
+    fu.dailyLabelForIndex(dailyReal, n - 1) !== "", "« " + fu.dailyLabelForIndex(dailyReal, n - 1) + " »");
+  check("axe : le dernier libellé correspond au jour courant (01/11)",
+    fu.dailyLabelForIndex(dailyReal, n - 1).indexOf("1") !== -1,
+    "« " + fu.dailyLabelForIndex(dailyReal, n - 1) + " »");
+  check("axe : les intermédiaires non échantillonnés restent vides (pas de surcharge)",
+    fu.dailyLabelForIndex(dailyReal, 1) === "" && fu.dailyLabelForIndex(dailyReal, 2) === "" &&
+    fu.dailyLabelForIndex(dailyReal, 4) === "", "");
+  check("axe : les intermédiaires échantillonnés restent lisibles (tous les 3 jours)",
+    fu.dailyLabelForIndex(dailyReal, 3) !== "" && fu.dailyLabelForIndex(dailyReal, 6) !== "", "");
+  check("axe : indice hors périmètre → vide (robustesse)",
+    fu.dailyLabelForIndex(dailyReal, -1) === "" && fu.dailyLabelForIndex(dailyReal, n) === "", "");
+  check("axe : liste vide/null → vide (robustesse)",
+    fu.dailyLabelForIndex([], 0) === "" && fu.dailyLabelForIndex(null, 0) === "", "");
+
+  // Le libellé suit la langue courante (formatDay), sans toucher au regroupement.
+  var lastFr = fu.dailyLabelForIndex(dailyReal, n - 1);
+  I18N._setLocaleSync("en");
+  var lastEn = fu.dailyLabelForIndex(dailyReal, n - 1);
+  check("axe : le libellé du dernier jour change selon la langue (fr ≠ en)",
+    lastFr !== lastEn && lastEn !== "", "« " + lastFr + " » vs « " + lastEn + " »");
+  I18N._setLocaleSync("fr");
+
+  // Les 30 valeurs numériques restent entières et inchangées (0 = zéro réel).
+  check("axe : la valeur du dernier jour reste 0 (aucune fausse barre)",
+    dailyReal[n - 1].games === 0, "");
 
   // --- 12 / 14. Données non modifiées et ordre de tri statistique inchangé.
   var sample = [

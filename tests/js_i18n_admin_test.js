@@ -64,7 +64,7 @@ FILES.forEach(function (locale) {
 check("les 4 catalogues sont chargés", FILES.every(function (l) { return catalogs[l]; }), "");
 FILES.forEach(function (locale) {
   var n = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).length : -1;
-  check("catalogue (" + locale + ") : 357 clés", n === 357, "n=" + n);
+  check("catalogue (" + locale + ") : 365 clés", n === 365, "n=" + n);
 });
 
 // ==================================================================== MOTEUR
@@ -323,7 +323,8 @@ var fu = null;
 try { fu = window.AdminUI && window.AdminUI.__test; } catch (e) {}
 check("aides pures de admin exposées (__test)",
   !!(fu && typeof fu.t === "function" && typeof fu.formatDate === "function" &&
-     typeof fu.escapeHtml === "function" && typeof fu.reRender === "function"),
+     typeof fu.formatDateCompact === "function" && typeof fu.escapeHtml === "function" &&
+     typeof fu.reRender === "function" && typeof fu.actIconButton === "function"),
   "");
 
 if (fu && I18N) {
@@ -343,7 +344,263 @@ if (fu && I18N) {
 
   // --- 11 / 12 / 13 / 14 : reRender existe et ne déclenche pas de fetch.
   check("reRender exposé (réaffichage en mémoire)", typeof fu.reRender === "function", "");
+
+  // ============ P2 — Dates compactes sur une ligne (comportemental, 4 langues).
+  // formatDateCompact passe par le moteur i18n/Intl : format numérique compact,
+  // sur une ligne (aucun nom de mois long), qui varie selon la langue.
+  var monthNames = ["novembre", "November", "noviembre", "月"];
+  var compactOut = {};
+  FILES.forEach(function (l) {
+    I18N._setLocaleSync(l);
+    compactOut[l] = fu.formatDateCompact("2026-11-01T12:00:00Z");
+    check("P2 : date compacte non vide (" + l + ")", compactOut[l].length > 0, "« " + compactOut[l] + " »");
+    check("P2 : date compacte sur une ligne (" + l + ")",
+      compactOut[l].indexOf("\n") === -1 && compactOut[l].trim().indexOf(" ") === -1 &&
+      compactOut[l].indexOf(" ") === -1, "« " + compactOut[l] + " »");
+    check("P2 : date compacte contient l'année (" + l + ")", compactOut[l].indexOf("2026") !== -1, "");
+    var hasLongMonth = monthNames.some(function (m) { return compactOut[l].indexOf(m) !== -1; });
+    check("P2 : date compacte sans nom de mois long (" + l + ")", !hasLongMonth, "« " + compactOut[l] + " »");
+  });
+  check("P2 : format de date change selon la langue (fr ≠ en)",
+    compactOut["fr"] !== compactOut["en"], compactOut["fr"] + " vs " + compactOut["en"]);
 }
+
+// ============ P2 — Structure du tableau & CSS (sources dynamiques).
+var styleSrc = readUTF8(BASE + "style.css");
+check("lecture style.css non vide (P2)", styleSrc && styleSrc.length > 500, "");
+
+// --- P2.a Cinq en-têtes de colonnes générés dans renderUsers.
+var thStart = adminSrc.indexOf('<thead><tr>');
+var thEnd = thStart >= 0 ? adminSrc.indexOf('</tr></thead>', thStart) : -1;
+var theadStr = thStart >= 0 && thEnd >= 0 ? adminSrc.slice(thStart, thEnd) : '';
+check("P2 : exactement 5 en-têtes <th> dans le tableau",
+  (theadStr.match(/<th>/g) || []).length === 5, "th=" + ((theadStr.match(/<th>/g) || []).length));
+
+// --- P2.b Cinq cellules <td> par ligne (correspondance aux en-têtes).
+var rowStrStart = adminSrc.indexOf('"<tr>"');
+var rowStrEnd = adminSrc.indexOf('"</tr>";', rowStrStart);
+var rowStr = rowStrStart >= 0 && rowStrEnd >= 0 ? adminSrc.slice(rowStrStart, rowStrEnd + 8) : "";
+var tdCount = (rowStr.match(/<td/g) || []).length;
+check("P2 : exactement 5 cellules <td> par ligne", tdCount === 5, "td=" + tdCount);
+
+// --- P2.c Message permanent retiré : plus aucun span visible admin-last-admin-note.
+check("P2 : plus de note visible admin-last-admin-note dans la ligne",
+  adminSrc.indexOf('class="admin-last-admin-note"') === -1 &&
+  adminSrc.indexOf('role="note"') === -1, "");
+// --- P2.d Explication accessible conservée : aria-describedby -> élément .sr-only.
+// Dans admin.js, les chaînes contiennent littéralement :
+//   'aria-describedby="' + noteId + '"'  et  '<span class="sr-only" id="' + noteId + '">'
+check("P2 : aria-describedby référençant la description accessible",
+  adminSrc.indexOf('aria-describedby="\' + noteId + \'"') !== -1, "");
+check("P2 : description accessible masquée via classe .sr-only",
+  adminSrc.indexOf('class="sr-only"') !== -1 &&
+  adminSrc.indexOf('<span class="sr-only" id="\' + noteId + \'">') !== -1, "");
+
+// --- P2.e Boutons désactivés du dernier admin conservés (disabled + aria + title).
+check("P2 : boutons désactivés du dernier admin conservés",
+  adminSrc.indexOf('disabled aria-disabled="true" title="') !== -1 &&
+  adminSrc.indexOf('data-admin-active="\' + u.id + \'" data-active="0"') !== -1 &&
+  adminSrc.indexOf('data-admin-role="\' + u.id + \'" data-makeadmin="0"') !== -1, "");
+check("P2 : info-bulle title alimentée par lastActiveAdminNote",
+  adminSrc.indexOf('title="\' + escapeHtml(lastNote)') !== -1 &&
+  adminSrc.indexOf('t("admin.lastActiveAdminNote"') !== -1, "");
+
+// --- P2.f Clé i18n admin.lastActiveAdminNote conservée dans toutes les langues.
+check("P2 : clé admin.lastActiveAdminNote présente dans les 4 langues",
+  FILES.every(function (l) { return (flatCatalogs[l] || {})["admin.lastActiveAdminNote"] !== undefined; }), "");
+
+// --- P2.g Colonne date sur une seule ligne via white-space:nowrap.
+var dateCss = styleSrc.indexOf("td.admin-date") !== -1 ?
+  styleSrc.slice(styleSrc.indexOf("td.admin-date"), styleSrc.indexOf("}", styleSrc.indexOf("td.admin-date")) + 1) : "";
+check("P2 : CSS .admin-table td.admin-date -> white-space: nowrap",
+  dateCss.indexOf("white-space") !== -1 && dateCss.indexOf("nowrap") !== -1, dateCss);
+
+// --- P2.h Défilement horizontal limité au conteneur .table-scroll.
+check("P2 : .table-scroll conserve overflow-x:auto",
+  /\.table-scroll\s*\{\s*overflow-x:\s*auto;\s*\}/.test(styleSrc), "");
+// --- P2.i / P2.1 Groupe d'actions interne : le <td> reste une cellule normale et
+// les boutons sont placés dans un conteneur flex interne aligné à gauche.
+check("P2.1 : conteneur interne admin-actions-group présent et fermé",
+  adminSrc.indexOf('<div class="admin-actions-group">') !== -1 &&
+  adminSrc.indexOf('admin-actions-group">\' + actions + "</div>"') !== -1, "");
+check("P2.1 : cellule actions <td class=\"admin-actions\"> conservée",
+  adminSrc.indexOf('<td class=\\"admin-actions\\">') !== -1, "");
+
+// Consulter reste la première action du groupe (définie avant les autres).
+check("P2.1 : Consulter est la première action du groupe",
+  adminSrc.indexOf('data-admin-view="') !== -1 &&
+  adminSrc.indexOf('data-admin-view="') < adminSrc.indexOf('data-admin-active="'), "");
+
+// Alignement horizontal : le groupe (block-level, = largeur de colonne) est
+// centré, alignant son centre sur celui de l'en-tête « Actions ».
+var grpCssStart = styleSrc.indexOf(".admin-actions-group {");
+var grpCss = grpCssStart >= 0 ?
+  styleSrc.slice(grpCssStart, styleSrc.indexOf("}", grpCssStart) + 1) : "";
+check("P2.2 : groupe d'actions centré (justify-content: center)",
+  grpCss.indexOf("justify-content: center") !== -1, grpCss);
+check("P2.1 : boutons pouvant passer à la ligne sans troncature (flex-wrap)",
+  grpCss.indexOf("flex-wrap") !== -1, grpCss);
+
+// Boutons désactivés : bordure visible mais discrète, conservée au survol.
+var discStart = styleSrc.indexOf(".admin-actions .btn:disabled {");
+var discCss = discStart >= 0 ?
+  styleSrc.slice(discStart, styleSrc.indexOf("}", discStart) + 1) : "";
+check("P2.1 : bouton désactivé avec bordure visible (border solide non transparente)",
+  discCss.indexOf("border: 1px solid #") !== -1, discCss);
+check("P2.1 : styles désactivés conservés au survol/focus (:disabled:hover)",
+  styleSrc.indexOf(".admin-actions .btn:disabled:hover") !== -1, "");
+
+// ==================================================================== P3 — Icônes SVG & légende des actions
+// Les 9 icônes attendues (déposées manuellement, non recréées) et leur usage.
+var P3_ICONS = [
+  "eye", "user-x", "user-check", "shield-plus", "shield-minus",
+  "key-round", "user-x-locked", "shield-minus-locked", "circle-help"
+];
+var badSvg = [];
+P3_ICONS.forEach(function (name) {
+  var svg = readUTF8(BASE + "assets/icons/" + name + ".svg");
+  // xmlns="http://www.w3.org/2000/svg" est un namespace déclaratif légitime (non
+  // chargé) ; on le neutralise avant de rechercher de vraies références externes.
+  var s = String(svg).replace('xmlns="http://www.w3.org/2000/svg"', "");
+  var ok = svg && svg.indexOf("<svg") !== -1 && svg.indexOf("</svg>") !== -1 &&
+           s.indexOf("<script") === -1 && s.indexOf("data:") === -1 &&
+           s.indexOf("http://") === -1 && s.indexOf("https://") === -1;
+  if (!ok) badSvg.push(name);
+});
+check("P3 : les 9 icônes SVG sont présentes et locales (sans script ni référence externe)",
+  badSvg.length === 0, badSvg.join(","));
+
+// --- Correspondance action -> icône dans admin.js.
+check("P3 : consulter -> icône eye (bouton actif)",
+  adminSrc.indexOf('actIconButton(t("admin.consult"') !== -1 &&
+  adminSrc.indexOf('"eye"') !== -1, "");
+check("P3 : actions interdites -> variantes verrouillées (user-x-locked / shield-minus-locked)",
+  adminSrc.indexOf('"user-x-locked"') !== -1 && adminSrc.indexOf('"shield-minus-locked"') !== -1, "");
+check("P3 : désactiver/réactiver -> user-x / user-check",
+  adminSrc.indexOf('"user-x"') !== -1 && adminSrc.indexOf('"user-check"') !== -1, "");
+check("P3 : rétrograder/promouvoir -> shield-minus / shield-plus",
+  adminSrc.indexOf('"shield-minus"') !== -1 && adminSrc.indexOf('"shield-plus"') !== -1, "");
+check("P3 : reset mot de passe -> key-round",
+  adminSrc.indexOf('"key-round"') !== -1, "");
+// Les variantes verrouillées sont réservées au bloc dernier-admin (disabled).
+var lockedStart = adminSrc.indexOf('"user-x-locked"');
+check("P3 : variantes verrouillées réservées au bloc dernier-admin",
+  lockedStart > adminSrc.indexOf('isLastActiveAdmin') &&
+  adminSrc.indexOf('"user-x-locked"', lockedStart + 1) === -1, "");
+
+// --- Comportement de construction d'un bouton icône (aides pures).
+if (fu) {
+  I18N._setLocaleSync("fr");
+  var p3Locked = fu.actIconButton("Désactiver", "user-x-locked",
+    ' disabled aria-disabled="true" title="X" aria-describedby="n1"', { disabled: true });
+  check("P3 : bouton interdit -> disabled + aria-disabled + title + aria-describedby + icône verrouillée",
+    p3Locked.indexOf('disabled aria-disabled="true"') !== -1 &&
+    p3Locked.indexOf('aria-label="Désactiver"') !== -1 &&
+    p3Locked.indexOf('data-icon="user-x-locked"') !== -1 &&
+    p3Locked.indexOf('title="X"') !== -1 && p3Locked.indexOf('aria-describedby="n1"') !== -1 &&
+    p3Locked.indexOf('class="btn btn-secondary btn-small admin-act"') !== -1, p3Locked);
+  var p3Active = fu.actIconButton("Consulter", "eye", ' data-admin-view="1"');
+  check("P3 : bouton actif -> title=label + aria-label + icône eye, non disabled",
+    p3Active.indexOf('data-admin-view="1"') !== -1 &&
+    p3Active.indexOf('aria-label="Consulter"') !== -1 &&
+    p3Active.indexOf('title="Consulter"') !== -1 &&
+    p3Active.indexOf('data-icon="eye"') !== -1 && p3Active.indexOf("disabled") === -1, p3Active);
+}
+
+// --- Légende interactive (index.html, élément <details>/<summary> natif).
+check("P3 : légende fermée par défaut (<details> sans attribut open)",
+  indexSrc.indexOf('<details class="admin-legend" id="adminActionsLegend">') !== -1 &&
+  indexSrc.indexOf('<details class="admin-legend" id="adminActionsLegend" open') === -1, "");
+check("P3 : légende ouvrable/fermable au clavier (<summary> natif)",
+  indexSrc.indexOf('<summary class="admin-legend-summary">') !== -1, "");
+check("P3 : le libellé de la légende utilise circle-help + clé actionsLegend",
+  indexSrc.indexOf('circle-help.svg') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.actionsLegend"') !== -1, "");
+check("P3 : les 6 descriptions d'action sont présentes et traduites (data-i18n)",
+  indexSrc.indexOf('data-i18n="admin.legendConsult"') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.legendDeactivate"') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.legendReactivate"') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.legendPromote"') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.legendDemote"') !== -1 &&
+  indexSrc.indexOf('data-i18n="admin.legendReset"') !== -1, "");
+check("P3 : explication discrète des variantes verrouillées présente (data-i18n)",
+  indexSrc.indexOf('data-i18n="admin.lockedActionExplanation"') !== -1, "");
+check("P3 : les icônes de la légende sont marquées décoratives (aria-hidden)",
+  (indexSrc.match(/aria-hidden="true"/g) || []).length >= 6, "");
+// Pas de message permanent du dernier admin dans les lignes (P2 conservé).
+check("P3 : aucun message permanent réapparu dans les lignes (pas de note visible)",
+  adminSrc.indexOf('class="admin-last-admin-note"') === -1 && adminSrc.indexOf('role="note"') === -1, "");
+
+// --- Nouvelles clés i18n dans les 4 catalogues.
+var P3_KEYS = ["admin.actionsLegend", "admin.lockedActionExplanation",
+  "admin.legendConsult", "admin.legendDeactivate", "admin.legendReactivate",
+  "admin.legendPromote", "admin.legendDemote", "admin.legendReset"];
+check("P3 : les 8 nouvelles clés existent dans les 4 catalogues",
+  P3_KEYS.every(function (k) {
+    return FILES.every(function (l) { return (flatCatalogs[l] || {})[k] !== undefined; });
+  }), "");
+check("P3 : actionsLegend traduite et variable selon la langue",
+  FILES.every(function (l) { return ((flatCatalogs[l] || {})["admin.actionsLegend"] || "").length > 0; }) &&
+  (flatCatalogs["fr"]["admin.actionsLegend"] !== flatCatalogs["en"]["admin.actionsLegend"]), "");
+
+// --- CSS compact / alignement / masques / légende.
+var actCssStart = styleSrc.indexOf(".admin-table .admin-act {");
+var actCss = actCssStart >= 0 ? styleSrc.slice(actCssStart, styleSrc.indexOf("}", actCssStart) + 1) : "";
+check("P3 : bouton icône compact (40 px) et centré",
+  actCss.indexOf("width: 40px") !== -1 && actCss.indexOf("height: 40px") !== -1 &&
+  actCss.indexOf("inline-flex") !== -1 && actCss.indexOf("justify-content: center") !== -1, actCss);
+check("P3 : icône blanche sur bouton actif (color #fff)",
+  styleSrc.indexOf(".admin-table .admin-act:not(:disabled) { color: #fff; }") !== -1, "");
+check("P3 : rendu des icônes via masque CSS (mask-image, préfixe et standard)",
+  styleSrc.indexOf(".admin-act-icon {") !== -1 &&
+  styleSrc.indexOf("-webkit-mask-image") !== -1 && styleSrc.indexOf("mask-image") !== -1, "");
+check("P3 : chaque icône d'action a sa règle [data-icon]",
+  P3_ICONS.filter(function (i) { return i !== "circle-help"; }).every(function (i) {
+    return styleSrc.indexOf('[data-icon="' + i + '"]') !== -1;
+  }), "");
+check("P3 : boutons désactivés conservent le contour gris (P2.1 préservé)",
+  styleSrc.indexOf(".admin-actions .btn:disabled {") !== -1 &&
+  styleSrc.indexOf("border: 1px solid #") !== -1, "");
+check("P3 : CSS de la légende présent (admin-legend)",
+  styleSrc.indexOf(".admin-legend {") !== -1 && styleSrc.indexOf(".admin-legend-summary {") !== -1 &&
+  styleSrc.indexOf(".admin-legend-locknote") !== -1, "");
+
+// --- Sécurité / protections administratives conservées.
+check("P3 : protections serveur du dernier admin conservées (clés serveur présentes)",
+  (flatCatalogs["fr"] || {})["admin.lastAdminRole"] !== undefined &&
+  (flatCatalogs["fr"] || {})["admin.lastAdminDeactivate"] !== undefined &&
+  (flatCatalogs["fr"] || {})["admin.roleUpdateFailed"] !== undefined, "");
+check("P3 : les 4 actions administratives restent raccordées (data-admin-*)",
+  adminSrc.indexOf('data-admin-view="') !== -1 && adminSrc.indexOf('data-admin-active="') !== -1 &&
+  adminSrc.indexOf('data-admin-role="') !== -1 && adminSrc.indexOf('data-admin-reset="') !== -1, "");
+
+// --- Licence Lucide + attribution README.
+var licTxt = readUTF8(BASE + "assets/icons/LICENSE-LUCIDE.txt");
+check("P3 : licence Lucide présente avec la section ISC",
+  licTxt.indexOf("ISC License") !== -1 &&
+  licTxt.indexOf("Lucide Icons and Contributors") !== -1, "");
+check("P3 : licence Lucide contient la liste Feather et le texte MIT (Cole Bemis)",
+  licTxt.indexOf("The following Lucide icons are derived from the Feather project") !== -1 &&
+  licTxt.indexOf("Cole Bemis") !== -1 && licTxt.indexOf("The MIT License (MIT)") !== -1, "");
+var readmeEn = readUTF8("/Users/didiers/Documents/Projets-IA/calculation-trainer/README.md");
+var readmeFr = readUTF8("/Users/didiers/Documents/Projets-IA/calculation-trainer/README.fr.md");
+check("P3 : README.md contient l'attribution Lucide + lien licence",
+  readmeEn.indexOf("Administration icons are based on Lucide") !== -1 &&
+  readmeEn.indexOf("LICENSE-LUCIDE.txt") !== -1, "");
+check("P3 : README.fr.md contient l'attribution Lucide + lien licence",
+  readmeFr.indexOf("basées sur Lucide") !== -1 &&
+  readmeFr.indexOf("LICENSE-LUCIDE.txt") !== -1, "");
+
+// ==================================================================== P3.1 En-tête « Actions » centré
+// L'en-tête de la 5e colonne doit être centré, sans toucher aux cellules ni aux
+// autres colonnes ; le <td>.admin-actions conserve son alignement de contenu.
+check("P3.1 : en-tête Actions centré (th:last-child -> text-align:center)",
+  /\.admin-table\s+th:last-child\s*\{\s*text-align:\s*center;\s*\}/.test(styleSrc), "");
+check("P3.1 : le th et le td de la dernière colonne sont bien séparés",
+  styleSrc.indexOf(".admin-table th:last-child") !== -1 &&
+  styleSrc.indexOf(".admin-table td:last-child") !== -1, "");
+check("P3.1 : le groupe d'actions est centré sous l'en-tête (justify-content: center)",
+  grpCss.indexOf("justify-content: center") !== -1, "");
 
 // ==================================================================== RÉSULTATS
 var failed = results.filter(function (r) { return !r.ok; });
