@@ -605,7 +605,13 @@ const AccountUI = (() => {
     const registerLocale = (window.I18N && typeof window.I18N.getLocale === "function")
       ? window.I18N.getLocale()
       : "fr";
-    const res = await api("auth/register", { login, password, preferred_language: registerLocale });
+    // Niveau scolaire facultatif (v12.8-B3.1) : le sélecteur porte id="registerSchoolLevel".
+    // Une valeur vide (« Non renseigné ») est transmise comme null (jamais "") pour
+    // que AuthService enregistre bien l'absence de niveau.
+    const schoolLevelSelect = document.getElementById("registerSchoolLevel");
+    const rawSchoolLevel = schoolLevelSelect ? schoolLevelSelect.value : "";
+    const schoolLevelPayload = rawSchoolLevel === "" ? null : rawSchoolLevel;
+    const res = await api("auth/register", { login, password, preferred_language: registerLocale, school_level: schoolLevelPayload });
     setBusy(btn, false);
 
     if (!res.ok) {

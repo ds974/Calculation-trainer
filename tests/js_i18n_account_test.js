@@ -218,6 +218,85 @@ schKeys.forEach(function (pair) {
     FILES.every(function (l) { return key in flatCatalogs[l]; }), "");
 });
 
+// ==================================================================== B1 (v12.8.1)
+// Correction de la liste déroulante vide du niveau scolaire à l'inscription.
+// Cause racine : le <select id="registerSchoolLevel"> portait une clé
+// data-i18n. Or applyToDom() (i18n.js) fait « el.textContent = traduction »
+// sur CHAQUE élément [data-i18n] ; appliqué à un <select>, cela écrase ses
+// <option> enfants -> liste vide et aucun niveau sélectionnable. Le sélecteur
+// du profil (account.js) fonctionne car son <select> ne porte PAS data-i18n.
+// Ces tests détectent précisément cette cause (et non seulement les clés).
+var REG_SELECT_RE = /<select id="registerSchoolLevel"([^>]*)>/;
+var selectTag = REG_SELECT_RE.exec(indexSrc);
+check("inscription : sélecteur du niveau scolaire présent (id=\"registerSchoolLevel\")",
+  !!selectTag, "");
+// POINT CLÉ : le <select> ne doit PAS porter data-i18n (sinon applyToDom()
+// écrase ses <option> via textContent -> liste vide).
+check("inscription : le <select> du niveau NE porte PAS data-i18n (cause racine)",
+  !!selectTag && selectTag[1].indexOf("data-i18n") === -1, selectTag ? selectTag[1] : "");
+// Les SEPT options sont présentes, avec les valeurs internes attendues.
+// On isole le bloc du <select id="registerSchoolLevel"> pour ne pas compter
+// les options du classement partagé (sharedLeaderboardLevel) qui réutilisent
+// les mêmes clés schoolLevel.*.
+function extractRegisterSelectRegion() {
+  var start = indexSrc.indexOf('<select id="registerSchoolLevel"');
+  if (start === -1) return "";
+  var end = indexSrc.indexOf("</select>", start);
+  return end === -1 ? "" : indexSrc.slice(start, end);
+}
+var regSelectRegion = extractRegisterSelectRegion();
+var regOptsRe = /<option value="([^"]*)"\s+data-i18n="schoolLevel\.[a-zA-Z]+"[^>]*>/g;
+var foundOptions = [];
+var om;
+while ((om = regOptsRe.exec(regSelectRegion)) !== null) foundOptions.push(om[1]);
+var expectedValues = ["", "preschool", "elementary_lower", "elementary_upper",
+                      "middle_school", "high_school", "higher_adult"];
+check("inscription : les SEPT <option> du niveau sont présents dans le HTML",
+  foundOptions.length === 7, "trouvés : " + foundOptions.join(","));
+var valuesOk = expectedValues.every(function (v) { return foundOptions.indexOf(v) !== -1; })
+  && foundOptions.length === expectedValues.length;
+check("inscription : valeurs internes des six niveaux + Non renseigné correctes",
+  valuesOk, "trouvés : " + foundOptions.join(","));
+// Chacune des sept options porte une clé data-i18n valide (aucune option muette).
+var allOptionsHaveKeys = foundOptions.length === 7 &&
+  (regSelectRegion.match(regOptsRe) || []).length === 7;
+check("inscription : chaque <option> du niveau porte une clé data-i18n",
+  allOptionsHaveKeys, "");
+// Retraduction garantie par le moteur global (applyToDom) qui traduit chaque
+// <option>[data-i18n] sans toucher au <select> : le libellé DU SÉLECTEUR n'est
+// jamais destiné à être écrit dans le <select> (le <label> porte déjà optional).
+check("inscription : clé schoolLevel.optional portée par un <label>, pas par le <select>",
+  indexSrc.indexOf('<label for="registerSchoolLevel" data-i18n="schoolLevel.optional">') !== -1
+    && REG_SELECT_RE.exec(indexSrc) !== null
+    && REG_SELECT_RE.exec(indexSrc)[1].indexOf("schoolLevel.optional") === -1, "");
+// Transmission du niveau choisi à auth/register (constraint 5) : handleRegister
+// doit lire le sélecteur et envoyer school_level ; « Non renseigné » (valeur
+// vide) est converti en null (jamais "") pour ne pas échouer la validation.
+check("inscription : handleRegister transmet school_level à auth/register",
+  accountSrc.indexOf('getElementById("registerSchoolLevel")') !== -1 &&
+  accountSrc.indexOf("school_level: schoolLevelPayload") !== -1 &&
+  accountSrc.indexOf('"school_level")') === -1, "");
+check("inscription : valeur vide « Non renseigné » convertie en null",
+  accountSrc.indexOf('rawSchoolLevel === "" ? null : rawSchoolLevel') !== -1
+    && accountSrc.indexOf('school_level: schoolLevelPayload') !== -1, "");
+check("inscription : le sélecteur reste facultatif (absence de niveau autorisée)",
+  accountSrc.indexOf('schoolLevelSelect ? schoolLevelSelect.value : ""') !== -1 &&
+  accountSrc.indexOf("rawSchoolLevel === \"\" ? null : rawSchoolLevel") !== -1, "");
+
+// Absence de régression du sélecteur du PROFIL (compte) : son <select> ne porte
+// toujours PAS data-i18n (sinon ses options seraient aussi écrasées), et ses
+// six + « Non renseigné » options restent présentes via account.js.
+check("profil : le <select> du niveau (accountSchoolLevelSelect) NE porte PAS data-i18n",
+  /<select id="accountSchoolLevelSelect"([^>]*)>/.test(accountSrc) &&
+    !/<select id="accountSchoolLevelSelect"[^>]*data-i18n=/.test(accountSrc), "");
+var profOptVals = ["", "preschool", "elementary_lower", "elementary_upper",
+                   "middle_school", "high_school", "higher_adult"];
+var profOptsOk = profOptVals.every(function (v) {
+  return accountSrc.indexOf('<option value="' + v + '" data-i18n="schoolLevel') !== -1;
+});
+check("profil : les sept <option> du niveau restent présents dans account.js",
+  profOptsOk, "");
+
 // A2 — Écran de compte (account.js) : les sept options du sélecteur de niveau
 // scolaire + le bouton d'enregistrement portent des clés data-i18n et
 // sont retraduits immédiatement par updateSchoolLevelTranslations() dès
