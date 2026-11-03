@@ -6,13 +6,13 @@
 //
 // Ce test vérifie que les écrans de connexion, d'inscription et de compte
 // (public/index.html + public/account.js) sont internationalisés à partir des
-// QUATRE catalogues (fr, en, es, zh-Hans), désormais à 365 clés chacun, sans
+// QUATRE catalogues (fr, en, es, zh-Hans), désormais à 392 clés chacun, sans
 // clé orpheline ni texte codé en dur dans les parcours visibles, tout en
 // préservant intégralement les mécanismes d'authentification.
 //
 // Couverture (§10 de la mission) :
 //   1. clés d'authentification (auth) et de compte (account) ;
-//   2. complétude des quatre catalogues (365 clés, structures identiques) ;
+//   2. complétude des quatre catalogues (392 clés, structures identiques) ;
 //   3. attributs HTML localisés (data-i18n / data-i18n-placeholder) des écrans
 //      de connexion, d'inscription et de compte ;
 //   4. messages de connexion (saisie, progression, succès, déconnexion, session) ;
@@ -80,10 +80,10 @@ FILES.forEach(function (locale) {
 check("les 4 catalogues sont chargés", catOk && FILES.every(function (l) { return catalogs[l]; }), "");
 
 var refKeys = flatCatalogs["fr"] ? Object.keys(flatCatalogs["fr"]).sort() : [];
-check("nombre de clés français = 365", refKeys.length === 365, "trouvées : " + refKeys.length);
+check("nombre de clés français = 392", refKeys.length === 392, "trouvées : " + refKeys.length);
 FILES.forEach(function (locale) {
   var keys = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).sort() : [];
-  check("nombre de clés (" + locale + ") = 365", keys.length === 365, "trouvées : " + keys.length);
+  check("nombre de clés (" + locale + ") = 392", keys.length === 392, "trouvées : " + keys.length);
 });
 var refSet = {};
 refKeys.forEach(function (k) { refSet[k] = true; });
@@ -188,6 +188,98 @@ check("result.debriefColumnCalculation (es)", flatCatalogs["es"]["result.debrief
 check("result.debriefColumnResult (es)", flatCatalogs["es"]["result.debriefColumnResult"] === "Resultado", "« " + flatCatalogs["es"]["result.debriefColumnResult"] + " »");
 check("result.debriefColumnCalculation (zh-Hans)", flatCatalogs["zh-Hans"]["result.debriefColumnCalculation"] === "计算与订正", "« " + flatCatalogs["zh-Hans"]["result.debriefColumnCalculation"] + " »");
 check("result.debriefColumnResult (zh-Hans)", flatCatalogs["zh-Hans"]["result.debriefColumnResult"] === "结果", "« " + flatCatalogs["zh-Hans"]["result.debriefColumnResult"] + " »");
+
+// ==================================================================== B3.2c
+// Ciblage des deux anomalies de traduction du niveau scolaire relevées en
+// tests manuels Firefox :
+//   A) les OPTIONS du niveau scolaire ne changeaient pas de langue ;
+//   B) le bouton « Enregistrer le niveau » n'était traduit qu'après un
+//      enregistrement.
+// On vérifie que les SEPT options et le bouton sont traduits dès l'affichage,
+// que la traduction est ré-appliquée immédiatement au changement de langue,
+// sans requête API, et qu'aucune saisie ni sélection n'est recréée.
+
+// A1 — Formulaire d'inscription (HTML statique) : les sept options + le
+// libellé portent des clés data-i18n valides, présentes dans les 4 langues.
+var schKeys = [
+  ["schoolLevel.optional", "libellé"],
+  ["schoolLevel.unspecified", "option Non renseigné"],
+  ["schoolLevel.preschool", "option Maternelle et avant"],
+  ["schoolLevel.elementaryLower", "option Début élémentaire"],
+  ["schoolLevel.elementaryUpper", "option Fin élémentaire"],
+  ["schoolLevel.middleSchool", "option Collège"],
+  ["schoolLevel.highSchool", "option Lycée"],
+  ["schoolLevel.higherAdult", "option Supérieur et adultes"]
+];
+schKeys.forEach(function (pair) {
+  var key = pair[0];
+  check("inscription : clé data-i18n « " + key + " » (niveau scolaire, " + pair[1] + ")",
+    indexSrc.indexOf('data-i18n="' + key + '"') !== -1 &&
+    FILES.every(function (l) { return key in flatCatalogs[l]; }), "");
+});
+
+// A2 — Écran de compte (account.js) : les sept options du sélecteur de niveau
+// scolaire + le bouton d'enregistrement portent des clés data-i18n et
+// sont retraduits immédiatement par updateSchoolLevelTranslations() dès
+// l'affichage (appelé dans renderAccountScreen).
+var profKeys = [
+  "schoolLevel.title", "schoolLevel.optional", "schoolLevel.unspecified",
+  "schoolLevel.preschool", "schoolLevel.elementaryLower",
+  "schoolLevel.elementaryUpper", "schoolLevel.middleSchool",
+  "schoolLevel.highSchool", "schoolLevel.higherAdult", "schoolLevel.saveButton"
+];
+profKeys.forEach(function (key) {
+  check("compte : clé niveau scolaire « " + key + " » présente dans les 4 langues",
+    FILES.every(function (l) { return key in flatCatalogs[l]; }), "");
+  check("compte : clé niveau scolaire « " + key + " » référencée (account.js)",
+    accountSrc.indexOf('"' + key + '"') !== -1, "");
+});
+
+// Les options du sélecteur de compte sont bien traduites par le moteur i18n
+// (retraduction depuis les clés, jamais un texte codé en dur conservé).
+check("compte : updateSchoolLevelTranslations traduit les sept options",
+  accountSrc.indexOf("function updateSchoolLevelTranslations()") !== -1 &&
+  accountSrc.indexOf('option.setAttribute("data-i18n")') === -1 && // pas de clé en dur par attribut
+  accountSrc.indexOf("option.hasAttribute(\"data-i18n\")") !== -1 &&
+  accountSrc.indexOf("option.textContent = i18nT(key") !== -1, "");
+check("compte : renderAccountScreen appelle updateSchoolLevelTranslations dès l'affichage",
+  accountSrc.indexOf("function renderAccountScreen()") !== -1 &&
+  accountSrc.indexOf("updateSchoolLevelTranslations();") !== -1, "");
+
+// Le bouton est retraduit dès l'affichage et après un enregistrement.
+check("compte : le bouton d'enregistrement est traduit dès l'affichage",
+  accountSrc.indexOf('data-i18n="schoolLevel.saveButton"') !== -1 &&
+  accountSrc.indexOf('updateSchoolLevelTranslations();') !== -1, "");
+check("compte : le bouton est retraduit APRÈS un enregistrement",
+  accountSrc.indexOf('button.textContent = i18nT("schoolLevel.saveButton"') !== -1, "");
+
+// Valeurs traduites effectives dans les quatre langues (au moins le bouton).
+var btnExpected = {
+  "fr": "Enregistrer le niveau", "en": "Save level",
+  "es": "Guardar nivel", "zh-Hans": "保存学段"
+};
+FILES.forEach(function (l) {
+  check("schoolLevel.saveButton (" + l + ") traduite", flatCatalogs[l]["schoolLevel.saveButton"] === btnExpected[l],
+    "« " + flatCatalogs[l]["schoolLevel.saveButton"] + " »");
+});
+
+// A3 — À la langue change, l'écran de compte actif est ré-rendu et le niveau
+// sélectionné est CONCERNÉ : renderAccountScreen initialise select.value
+// d'après user.school_level, donc la sélection est préservée malgré la
+// retraduction des libellés (pas de recréation brute des champs).
+check("compte : renderAccountScreen conserve la sélection du niveau",
+  accountSrc.indexOf("select.value = user.school_level") !== -1, "");
+// Le ré-affichage du compte est déclenché dans le callback de changement de
+// langue (sans requête API ni recréation des champs : le callback ne contient
+// ni api( ni refreshCsrf() ni fetch() ni .innerHTML=).
+var slCbStart = accountSrc.indexOf("window.I18N.onLocaleChange((locale) => {");
+var slCbEnd = slCbStart >= 0 ? accountSrc.indexOf("});", slCbStart) : -1;
+var slCb = (slCbStart >= 0 && slCbEnd >= 0) ? accountSrc.slice(slCbStart, slCbEnd + 3) : "";
+check("compte : retraduction au changement de langue (ré-affichage du compte)",
+  slCb.indexOf("renderAccountScreen();") !== -1 &&
+  slCb.indexOf("api(") === -1 && slCb.indexOf("refreshCsrf(") === -1 &&
+  slCb.indexOf("fetch(") === -1 && slCb.indexOf(".innerHTML =") === -1, "");
+
 
 // ==================================================================== ACCOUNT.JS
 // Évaluation de account.js avec stubs DOM minimaux (sans déclencher init).
@@ -367,6 +459,53 @@ check("connexion : saisie requise identifiant + mot de passe",
   accountSrc.indexOf("if (!login || !password)") !== -1, "");
 check("mot de passe : ancien + nouveau ≥ 10 + confirmation (gardes existantes)",
   accountSrc.indexOf("newPassword.length < 10") !== -1 && accountSrc.indexOf("newPassword !== confirm") !== -1, "");
+
+// ==================== 15. B4.3 — Requêtes GET du classement partagé ====================
+// La cause du dysfonctionnement Firefox : `AccountUI.api(action, payload, "GET")`
+// construisait l'URL sans y ajouter les paramètres de `payload`. Toutes les
+// sélections de niveau/mode/type du classement partagé étaient donc envoyées
+// avec les défauts serveur (niveau=all…) et le tableau paraissait identique.
+// Ces tests capturent l'URL réellement construite pour le GET leaderboard.
+var savedFetch = globalThis.fetch;
+var capturedUrl = null;
+globalThis.fetch = function (url, opts) {
+  capturedUrl = url;
+  return Promise.resolve({
+    status: 200,
+    json: function () { return Promise.resolve({ ok: true, data: {} }); }
+  });
+};
+// `api` est synchronisé jusqu'à son premier `await` : l'appel déclenche fetch().
+if (window.AccountUI && typeof window.AccountUI.api === "function") {
+  window.AccountUI.api("leaderboard",
+    { mode: "addition", school_level: "elementary_lower", question_type: "hole", limit: 20 },
+    "GET");
+}
+check("B4.3 GET leaderboard : URL contient school_level=elementary_lower",
+  !!capturedUrl && capturedUrl.indexOf("school_level=elementary_lower") !== -1,
+  String(capturedUrl));
+check("B4.3 GET leaderboard : URL contient mode=addition",
+  !!capturedUrl && capturedUrl.indexOf("mode=addition") !== -1,
+  String(capturedUrl));
+check("B4.3 GET leaderboard : URL contient question_type=hole",
+  !!capturedUrl && capturedUrl.indexOf("question_type=hole") !== -1,
+  String(capturedUrl));
+check("B4.3 GET leaderboard : URL contient limit=20",
+  !!capturedUrl && capturedUrl.indexOf("limit=20") !== -1,
+  String(capturedUrl));
+check("B4.3 GET leaderboard : URL contient action=leaderboard",
+  !!capturedUrl && capturedUrl.indexOf("action=leaderboard") !== -1,
+  String(capturedUrl));
+// GET sans payload (auth/csrf, profile) : l'URL reste `?action=...` (rétrocompat).
+capturedUrl = null;
+if (window.AccountUI && typeof window.AccountUI.api === "function") {
+  window.AccountUI.api("auth/csrf", null, "GET");
+}
+check("B4.3 GET sans payload : URL réduite à ?action=auth%2Fcsrf",
+  !!capturedUrl && capturedUrl.indexOf("action=auth%2Fcsrf") !== -1
+    && capturedUrl.indexOf("school_level=") === -1,
+  String(capturedUrl));
+globalThis.fetch = savedFetch;
 
 // ==================================================================== RÉSULTATS
 var failed = results.filter(function (r) { return !r.ok; });

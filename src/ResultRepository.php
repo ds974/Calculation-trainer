@@ -25,6 +25,10 @@ final class ResultRepository
      * @param ?string $playedAt date/heure UTC (format 'Y-m-d\TH:i:s\Z'), sinon SQLite 'now'.
      * @param ?string $guestId  identifiant d'origine (partie invitée), sinon null.
      * @param string $questionType type de questions (v12.3) : classic | hole | mixed.
+     * @param ?int   $durationMs durée de la partie en millisecondes (v12.8-B2) ;
+     *                           null = inconnue (historique / client ancien).
+     * @param string $schoolLevel niveau scolaire figé (v12.8-B1/B2) :
+     *                           l'un des sept identifiants, 'unspecified' par défaut.
      * @return int identifiant de la ligne insérée.
      */
     public function insert(
@@ -33,13 +37,17 @@ final class ResultRepository
         int $score,
         ?string $playedAt = null,
         ?string $guestId = null,
-        string $questionType = 'classic'
+        string $questionType = 'classic',
+        ?int $durationMs = null,
+        string $schoolLevel = 'unspecified'
     ): int {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO results (user_id, mode, score, played_at, guest_id, question_type)
-             VALUES (:user_id, :mode, :score,
-                     COALESCE(:played_at, strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\')),
-                     :guest_id, :question_type)'
+            'INSERT INTO results
+                (user_id, mode, score, played_at, guest_id, question_type, duration_ms, school_level)
+             VALUES
+                (:user_id, :mode, :score,
+                 COALESCE(:played_at, strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\')),
+                 :guest_id, :question_type, :duration_ms, :school_level)'
         );
         $stmt->execute([
             'user_id'       => $userId,
@@ -48,6 +56,8 @@ final class ResultRepository
             'played_at'     => $playedAt,
             'guest_id'      => $guestId,
             'question_type' => $questionType,
+            'duration_ms'   => $durationMs,
+            'school_level'  => $schoolLevel,
         ]);
         return (int)$this->pdo->lastInsertId();
     }

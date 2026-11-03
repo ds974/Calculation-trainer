@@ -56,6 +56,22 @@ final class TestRunner
         // v12.6-C1 : préférence linguistique des comptes (SQLite + API).
         $this->testPreferredLanguage();
 
+        // v12.8-B3.1 : niveau scolaire du profil — inscription, mise à jour,
+        // validation et invariants (service, base temporaire).
+        $this->testSchoolLevel();
+
+        // v12.8-B1 : schéma et migration des niveaux scolaires (SQLite uniquement).
+        $this->testSchoolLevelMigration();
+
+        // v12.8-B2 : durée des parties (schema/migration SQLite) + enregistrement
+        // de la durée et du niveau scolaire historique côté service.
+        $this->testDurationSchemaAndMigration();
+        $this->testSchoolLevelAndDurationService();
+
+        // v12.8-B4.1 : classement partagé côté serveur (meilleur résultat par joueur,
+        // filtres mode/niveau/type/limite, comptes actifs uniquement, confidentialité).
+        $this->testLeaderboardService();
+
         // Étape 3 : enregistrement des résultats et historique (l'import invité a
         // été retiré en v12.2 — plus de route serveur, plus de méthode importGuest).
         $this->testResultSave();
@@ -1037,8 +1053,814 @@ final class TestRunner
             $this->check(false, "Préférence linguistique : {$e->getMessage()}");
         }
     }
+    // --- Étape v12.8-B3.1 : niveau scolaire du profil (service + base temporaire) ---
 
-    // --- Étape 3 : enregistrement d'un résultat valide ---
+    /**
+     * Vérifie la gestion du niveau scolaire dans le profil (validation, inscription,
+     * mise à jour, invariants) au niveau SERVICE, sur une base SQLite temporaire :
+     *  - six identifiants stables acceptés, null accepté (« Non renseigné ») ;
+     *  - valeurs arbitraires / 'unspecified' / intitulés traduits refusés, valeur intacte ;
+     *  - inscription facultative (absente, avec niveau, avec null) ;
+     *  - persistance en base, puis retour à « Non renseigné » (null) ;
+     *  - les réponses publiques exposent school_level sans donnée sensible ;
+     *  - pas d'altération du rôle, du statut, de la langue ni des scores.
+     */
+    private function testSchoolLevel(): void
+    {
+        echo "[Niveau scolaire du profil (v12.8-B3.1)]\n";
+        try {
+            $root = sys_get_temp_dir() . '/calc_trainer_sl_' . getmypid();
+            @mkdir($root, 0777, true);
+            $db = new Database($root);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $auth = new AuthService($pdo, $repo);
+
+            $levels = Validator::allowedSchoolLevels();
+
+            // 1) Inscription SANS niveau => NULL (« Non renseigné »).
+            $u0 = $auth->register(['login' => 'sl_none', 'password' => 'unMotDePasseSûr000']);
+            $this->check(($u0['school_level'] ?? null) === null, 'Inscription sans niveau => null (Non renseigné)');
+            $persisted = (new UserRepository($pdo))->findById((int)$u0['id']);
+            $this->check(($persisted['school_level'] ?? null) === null, 'Colonne NULL persistée pour compte sans niveau');
+
+            // 2) Chacune des six catégories est acceptée à l'inscription et persistée.
+            $okAll = true;
+            foreach ($levels as $i => $lvl) {
+                $u = $auth->register(['login' => 'sl_' . $i, 'password' => 'unMotDePasseSûr' . str_pad((string)$i, 3, '0', STR_PAD_LEFT), 'school_level' => $lvl]);
+                if (($u['school_level'] ?? null) !== $lvl) {
+                    $okAll = false;
+                }
+                if (((new UserRepository($pdo))->findById((int)$u['id'])['school_level'] ?? null) !== $lvl) {
+                    $okAll = false;
+                }
+            }
+            $this->check($okAll, 'Les six niveaux acceptés et persistés à l\'inscription');
+
+            // 3) Inscription avec null explicite => non renseigné (NULL).
+            $uNull = $auth->register(['login' => 'sl_null', 'password' => 'unMotDePasseSûr010', 'school_level' => null]);
+            $this->check(($uNull['school_level'] ?? null) === null, 'Inscription avec school_level null => null');
+
+            // 4) Valeurs invalides rejetées à l'inscription (intitulé, unspecified, booléen, numérique).
+            $badRegister = 0;
+            foreach (['CP', 'unspecified', true, 3, 'collège'] as $bad) {
+                try {
+                    $auth->register(['login' => 'sl_bad_' . $badRegister, 'password' => 'unMotDePasseSûr999', 'school_level' => $bad]);
+                } catch (InvalidArgumentException) {
+                    $badRegister++;
+                }
+            }
+            $this->check($badRegister === 5, 'Inscription : intitulés/unspecified/booléen/numérique refusés');
+
+            // 5) Connexion renvoie le niveau enregistré.
+            $logged = $auth->login('sl_1', 'unMotDePasseSûr001');
+            $this->check(($logged['school_level'] ?? null) === 'elementary_lower', 'Connexion renvoie le niveau enregistré');
+
+
+
+            // 6) changeSchoolLevel vers une catégorie => persisté.
+            $id0 = (int)$u0['id'];
+            $upd = $auth->changeSchoolLevel($id0, 'middle_school');
+            $this->check(($upd['school_level'] ?? null) === 'middle_school', 'changeSchoolLevel vers middle_school => renvoyé');
+            $this->check(
+                ((new UserRepository($pdo))->findById($id0)['school_level'] ?? null) === 'middle_school',
+                'middle_school bien persisté en base'
+            );
+
+            // 7) Retour à « Non renseigné » via null => NULL.
+            $back = $auth->changeSchoolLevel($id0, null);
+            $this->check(($back['school_level'] ?? null) === null, 'changeSchoolLevel null => Non renseigné (null)');
+            $this->check(
+                ((new UserRepository($pdo))->findById($id0)['school_level'] ?? null) === null,
+                'Colonne NULL après retour à Non renseigné'
+            );
+
+            // 8) Valeur invalide refusée, niveau précédent intact.
+            $auth->changeSchoolLevel($id0, 'high_school');
+            try {
+                $auth->changeSchoolLevel($id0, 'ce1');
+                $this->check(false, 'changeSchoolLevel avec valeur invalide refusée');
+            } catch (InvalidArgumentException) {
+                $this->check(
+                    ((new UserRepository($pdo))->findById($id0)['school_level'] ?? '') === 'high_school',
+                    'Valeur invalide refusée : le niveau précédent (high_school) reste intact'
+                );
+            }
+            try {
+                $auth->changeSchoolLevel($id0, 'unspecified');
+                $this->check(false, 'changeSchoolLevel avec unspecified refusée dans le profil');
+            } catch (InvalidArgumentException) {
+                $this->check(
+                    ((new UserRepository($pdo))->findById($id0)['school_level'] ?? '') === 'high_school',
+                    'unspecified refusé dans le profil (null exprime Non renseigné)'
+                );
+            }
+
+            // 9) Aucune altération du rôle/statut/langue et des scores après changement,
+            //    et niveau HISTORIQUE d'une partie déjà enregistrée inchangé.
+            $auth2 = new AuthService($pdo, new UserRepository($pdo));
+            $guard = $auth2->register(['login' => 'sl_guard', 'password' => 'unMotDePasseSûr321']);
+            $gid = (int)$guard['id'];
+            $repo2 = new UserRepository($pdo);
+            $roleBefore = (string)$repo2->findById($gid)['role'];
+            $activeBefore = (int)$repo2->findById($gid)['is_active'];
+            $langBefore = (string)$repo2->findById($gid)['preferred_language'];
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $results->save($gid, 'multiplication', 7);
+            $auth2->changeSchoolLevel($gid, 'elementary_upper');
+            $after = $repo2->findById($gid);
+            $this->check(
+                (string)$after['role'] === $roleBefore && (int)$after['is_active'] === $activeBefore
+                    && (string)$after['preferred_language'] === $langBefore,
+                'Rôle, statut et langue inchangés après changement de niveau'
+            );
+            $this->check(
+                (string)$pdo->query("SELECT school_level FROM results WHERE user_id = {$gid} LIMIT 1")->fetchColumn() === 'unspecified',
+                'La partie enregistrée avant le changement garde un niveau historique unspecified'
+            );
+
+            // 10) Réponses publiques sans donnée sensible.
+            $this->check(!isset($upd['password_hash']), 'Changement de niveau : aucune empreinte exposée');
+        } catch (Throwable $e) {
+            $this->check(false, "Niveau scolaire du profil : {$e->getMessage()}");
+        }
+    }
+
+    // --- Étape v12.8-B1 : schéma et migration des niveaux scolaires (SQLite) ---
+
+    /**
+     * Vérifie le schéma v12.8 des niveaux scolaires :
+     *  - colonnes users.school_level (NULL = Non renseigné) et results.school_level
+     *    (NOT NULL DEFAULT 'unspecified', niveau historique figé) ;
+     *  - contraintes CHECK acceptant les identifiants stables et rejetant les valeurs
+     *    arbitraires ou interdites ;
+     *  - migration idempotente et non destructive d'un schéma v12.7 pré-existant ;
+     *  - préservation de toutes les données historiques ;
+     *  - nouvel index et conservations des index existants.
+     *
+     * Utilise exclusivement des bases SQLite temporaires : aucune base réelle n'est touchée.
+     */
+    private function testSchoolLevelMigration(): void
+    {
+        echo "[Niveaux scolaires — schéma et migration (v12.8-B1)]\n";
+
+        $levels = ['preschool', 'elementary_lower', 'elementary_upper',
+                   'middle_school', 'high_school', 'higher_adult'];
+        $levelsWithUnspecified = array_merge($levels, ['unspecified']);
+
+        try {
+            // 1) Base NEUVE : les deux colonnes existent, avec les bons défauts.
+            $freshRoot = $this->tmpRoot . DIRECTORY_SEPARATOR . 'sl_fresh_' . uniqid();
+            $db = new Database($freshRoot);
+            $pdo = $db->pdo();
+
+            $usersCols = array_column($pdo->query("PRAGMA table_info(users)")->fetchAll(), 'name');
+            $resultsCols = array_column($pdo->query("PRAGMA table_info(results)")->fetchAll(), 'name');
+            $this->check(in_array('school_level', $usersCols, true), 'Base neuve : users.school_level présente');
+            $this->check(in_array('school_level', $resultsCols, true), 'Base neuve : results.school_level présente');
+
+            // users.school_level : nullable, sans valeur par défaut.
+            $uDefault = $pdo->query(
+                "SELECT dflt_value FROM pragma_table_info('users') WHERE name = 'school_level'"
+            )->fetchColumn();
+            $this->check($uDefault === null, 'users.school_level : aucune valeur par défaut (NULL = Non renseigné)');
+
+            // results.school_level : NOT NULL avec défaut 'unspecified'.
+            $rNotNull = (int)$pdo->query(
+                "SELECT `notnull` FROM pragma_table_info('results') WHERE name = 'school_level'"
+            )->fetchColumn();
+            $rDefault = $pdo->query(
+                "SELECT dflt_value FROM pragma_table_info('results') WHERE name = 'school_level'"
+            )->fetchColumn();
+            $this->check($rNotNull === 1, 'results.school_level : NOT NULL');
+            $this->check($rDefault === "'unspecified'", 'results.school_level : défaut = unspecified');
+
+            // 2) users.school_level accepte NULL et les six catégories, refuse unspecified/arbitraire.
+            $repo = new UserRepository($pdo);
+            $okLevels = 0;
+            foreach ($levels as $lv) {
+                $uid = $repo->create(['login' => 'lv_' . $lv, 'password' => 'unMotDePasseSûr123', 'role' => 'user']);
+                $pdo->prepare('UPDATE users SET school_level = :lv WHERE id = :id')
+                    ->execute(['lv' => $lv, 'id' => $uid]);
+                $stored = $pdo->query("SELECT school_level FROM users WHERE id = {$uid}")->fetchColumn();
+                if ($stored === $lv) $okLevels++;
+            }
+            $this->check($okLevels === count($levels), 'users.school_level accepte les six catégories');
+
+            $nullUid = $repo->create(['login' => 'lv_null', 'password' => 'unMotDePasseSûr456', 'role' => 'user']);
+            $storedNull = $pdo->query("SELECT school_level FROM users WHERE id = {$nullUid}")->fetchColumn();
+            $this->check($storedNull === null, 'users.school_level accepte NULL (Non renseigné)');
+
+            $rejectedUsers = 0;
+            $badUserLevels = ['unspecified', 'college', 'CP', 'elementary'];
+            foreach ($badUserLevels as $bad) {
+                try {
+                    $pdo->prepare('UPDATE users SET school_level = :lv WHERE id = :id')
+                        ->execute(['lv' => $bad, 'id' => $nullUid]);
+                } catch (PDOException) {
+                    $rejectedUsers++;
+                }
+            }
+            $this->check($rejectedUsers === count($badUserLevels),
+                'users.school_level refuse unspecified et valeurs arbitraires');
+            $this->check(
+                $pdo->query("SELECT school_level FROM users WHERE id = {$nullUid}")->fetchColumn() === null,
+                'users.school_level : valeur précédente (NULL) conservée après refus'
+            );
+
+            // 3) results.school_level accepte les sept identifiants, refuse NULL/arbitraire.
+            $resUid = $repo->create(['login' => 'lv_res', 'password' => 'unMotDePasseSûr789', 'role' => 'user']);
+            $okResultLevels = 0;
+            foreach ($levelsWithUnspecified as $lv) {
+                $pdo->prepare(
+                    'INSERT INTO results (user_id, mode, score, school_level) VALUES (?, ?, ?, ?)'
+                )->execute([$resUid, 'multiplication', 5, $lv]);
+                $rid = (int)$pdo->lastInsertId();
+                $sc = $pdo->query("SELECT school_level FROM results WHERE id = {$rid}")->fetchColumn();
+                if ($sc === $lv) $okResultLevels++;
+            }
+            $this->check($okResultLevels === count($levelsWithUnspecified),
+                'results.school_level accepte les sept identifiants');
+
+            // results.school_level par défaut (INSERT sans la colonne) => unspecified.
+            $pdo->exec("INSERT INTO results (user_id, mode, score) VALUES ({$resUid}, 'addition', 6)");
+            $defaultSc = $pdo->query("SELECT school_level FROM results ORDER BY id DESC LIMIT 1")->fetchColumn();
+            $this->check($defaultSc === 'unspecified', 'results.school_level : défaut unspecified à l INSERT');
+
+            $rejectedResults = 0;
+            $badResultLevels = ['college', 'CP', '', 'unknown'];
+            foreach ($badResultLevels as $bad) {
+                try {
+                    $pdo->prepare('INSERT INTO results (user_id, mode, score, school_level) VALUES (?, ?, ?, ?)')
+                        ->execute([$resUid, 'addition', 6, $bad]);
+                } catch (PDOException) {
+                    $rejectedResults++;
+                }
+            }
+            $this->check($rejectedResults === count($badResultLevels),
+                'results.school_level refuse les valeurs arbitraires');
+
+            $nullRejected = false;
+            try {
+                $pdo->prepare('INSERT INTO results (user_id, mode, score, school_level) VALUES (?, ?, ?, ?)')
+                    ->execute([$resUid, 'addition', 6, null]);
+            } catch (PDOException) {
+                $nullRejected = true;
+            }
+            $this->check($nullRejected, 'results.school_level refuse NULL (NOT NULL)');
+
+            // 4) Migration d'un SCHÉMA v12.7 existant (données préservées).
+            // NB : Database($root) résout la base vers <root>/storage/calculation-trainer.sqlite,
+            // donc la base ancienne doit être placée sous storage/ pour être migrée in situ.
+            $oldRoot = $this->tmpRoot . DIRECTORY_SEPARATOR . 'sl_old_' . uniqid();
+            if (!is_dir($oldRoot)) {
+                @mkdir($oldRoot, 0777, true);
+            }
+            $oldStorage = $oldRoot . DIRECTORY_SEPARATOR . 'storage';
+            if (!is_dir($oldStorage)) {
+                @mkdir($oldStorage, 0777, true);
+            }
+            $oldPath = $oldStorage . DIRECTORY_SEPARATOR . 'calculation-trainer.sqlite';
+
+            // Construire manuellement une base v12.7 (sans school_level) avec données.
+            $opdo = new PDO('sqlite:' . $oldPath);
+            $opdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $opdo->exec('PRAGMA foreign_keys = ON');
+            $opdo->exec("CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+                preferred_language TEXT NOT NULL DEFAULT 'fr',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )");
+            $opdo->exec("CREATE TABLE results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                played_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                mode TEXT NOT NULL CHECK (mode IN ('multiplication','addition')),
+                score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
+                guest_id TEXT,
+                question_type TEXT NOT NULL DEFAULT 'classic' CHECK (question_type IN ('classic','hole','mixed')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )");
+            $opdo->exec('CREATE INDEX idx_results_user ON results(user_id)');
+            $opdo->exec('CREATE INDEX idx_results_mode ON results(mode)');
+            $opdo->exec('CREATE INDEX idx_results_played ON results(played_at)');
+
+            $opdo->prepare('INSERT INTO users (login, password_hash, role) VALUES (?, ?, ?)')
+                ->execute(['old_user', 'x', 'user']);
+            $oldUid = (int)$opdo->lastInsertId();
+            $opdo->prepare(
+                'INSERT INTO results (user_id, mode, score, played_at, question_type) VALUES (?, ?, ?, ?, ?)'
+            )->execute([$oldUid, 'multiplication', 8, '2024-05-01T10:00:00Z', 'classic']);
+            $oldRid = (int)$opdo->lastInsertId();
+            $opdo->prepare(
+                'INSERT INTO results (user_id, mode, score, played_at, question_type) VALUES (?, ?, ?, ?, ?)'
+            )->execute([$oldUid, 'addition', 7, '2024-05-02T11:00:00Z', 'hole']);
+
+            // Déclenche la migration en instanciant Database sur cette base ancienne.
+            $migDb = new Database($oldRoot);
+            $mpdo = $migDb->pdo();
+
+            $mUsersCols = array_column($mpdo->query("PRAGMA table_info(users)")->fetchAll(), 'name');
+            $mResultsCols = array_column($mpdo->query("PRAGMA table_info(results)")->fetchAll(), 'name');
+            $this->check(in_array('school_level', $mUsersCols, true),
+                'Ancien schéma migré : users.school_level ajoutée');
+            $this->check(in_array('school_level', $mResultsCols, true),
+                'Ancien schéma migré : results.school_level ajoutée');
+            $this->check(
+                $mpdo->query("SELECT school_level FROM users WHERE id = {$oldUid}")->fetchColumn() === null,
+                'Ancien utilisateur migré → users.school_level = NULL (Non renseigné)'
+            );
+
+            // Les anciennes parties => 'unspecified', données historiques intactes.
+            $oldRow = $mpdo->query("SELECT * FROM results WHERE id = {$oldRid}")->fetch();
+            $this->check(($oldRow['school_level'] ?? '') === 'unspecified',
+                'Ancienne partie migrée → results.school_level = unspecified');
+            $this->check((int)$oldRow['id'] === $oldRid && (int)$oldRow['score'] === 8
+                    && $oldRow['mode'] === 'multiplication' && $oldRow['played_at'] === '2024-05-01T10:00:00Z'
+                    && $oldRow['question_type'] === 'classic',
+                'Scores, dates, modes et identifiants historiques inchangés après migration');
+            $allRows = $mpdo->query('SELECT COUNT(*) FROM results')->fetchColumn();
+            $this->check((int)$allRows === 2, 'Aucun résultat supprimé pendant la migration');
+
+            // 5) Idempotence : un second Database sur la même base ne renvoie aucune erreur
+            //    et ne duplique ni colonne ni index.
+            $migDb2 = new Database($oldRoot);
+            $mpdo2 = $migDb2->pdo();
+            $uCount = count(array_column($mpdo2->query("PRAGMA table_info(users)")->fetchAll(), 'name'));
+            $rCount = count(array_column($mpdo2->query("PRAGMA table_info(results)")->fetchAll(), 'name'));
+            $this->check($uCount === 10, 'Migration ré-exécutable : users non remaniée (idempotente)');
+            $this->check($rCount === 9, 'Migration ré-exécutable : results non remaniée (idempotente)');
+
+            // 6) Index existants conservés + nouvel index présent.
+            $idx = $mpdo2->query(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_results_%'"
+            )->fetchAll(PDO::FETCH_COLUMN);
+            $allIdxOk = in_array('idx_results_user', $idx, true)
+                && in_array('idx_results_mode', $idx, true)
+                && in_array('idx_results_played', $idx, true);
+            $this->check($allIdxOk, 'Index historiques (user/mode/played) préservés');
+            $this->check(in_array('idx_results_mode_school_score', $idx, true),
+                'Nouvel index idx_results_mode_school_score présent');
+
+            // 7) Clés étrangères et contraintes historiques toujours fonctionnelles.
+            $fkRejected = false;
+            try {
+                $mpdo2->prepare('INSERT INTO results (user_id, mode, score) VALUES (?, ?, ?)')
+                    ->execute([999999, 'multiplication', 5]);
+            } catch (PDOException) {
+                $fkRejected = true;
+            }
+            $this->check($fkRejected, 'Clé étrangère results.user_id toujours fonctionnelle');
+            $modeRejected = false;
+            try {
+                $mpdo2->prepare('INSERT INTO results (user_id, mode, score) VALUES (?, ?, ?)')
+                    ->execute([$oldUid, 'soustraction', 5]);
+            } catch (PDOException) {
+                $modeRejected = true;
+            }
+            $this->check($modeRejected, 'Contrainte CHECK mode toujours fonctionnelle');
+
+        } catch (Throwable $e) {
+            $this->check(false, 'Niveaux scolaires (v12.8-B1) : ' . $e->getMessage());
+        }
+    }
+
+    // --- v12.8-B2 : durée et niveau scolaire historique (SQLite + service) ---
+
+    /**
+     * Schéma et migration de `results.duration_ms` (v12.8-B2).
+     * Base neuve et migration d'une ancienne base : colonne nullable, vérifie
+     * l'idempotence, les contraintes, et préserve les données historiques.
+     */
+    private function testDurationSchemaAndMigration(): void
+    {
+        echo "[Durée des parties — schéma et migration (v12.8-B2)]\n";
+        try {
+            // 1) Base neuve : la colonne duration_ms existe et est NULLABLE.
+            $freshRoot = $this->tmpRoot . DIRECTORY_SEPARATOR . 'b2_fresh_' . uniqid();
+            $db = new Database($freshRoot);
+            $pdo = $db->pdo();
+            $rCols = array_column($pdo->query("PRAGMA table_info(results)")->fetchAll(), 'name');
+            $this->check(in_array('duration_ms', $rCols, true), 'Base neuve : results.duration_ms présente');
+
+            $dNotNull = (int)$pdo->query(
+                "SELECT `notnull` FROM pragma_table_info('results') WHERE name = 'duration_ms'"
+            )->fetchColumn();
+            $this->check($dNotNull === 0, 'results.duration_ms : nullable (NULL = durée inconnue)');
+            $dDefault = $pdo->query(
+                "SELECT dflt_value FROM pragma_table_info('results') WHERE name = 'duration_ms'"
+            )->fetchColumn();
+            $this->check($dDefault === null, 'results.duration_ms : aucune valeur par défaut');
+
+            // 2) Durée entière positive acceptée, NULL accepté.
+            $u0 = (new UserRepository($pdo))->create([
+                'login' => 'b2_schema', 'password' => 'unMotDePasseSûr123', 'role' => 'user',
+            ]);
+            $pdo->prepare(
+                'INSERT INTO results (user_id, mode, score, duration_ms, school_level)
+                 VALUES (?, ?, ?, ?, ?)'
+            )->execute([$u0, 'multiplication', 5, 12300, 'elementary_lower']);
+            $stored = $pdo->query(
+                "SELECT duration_ms FROM results WHERE user_id = {$u0}"
+            )->fetchColumn();
+            $this->check((int)$stored === 12300, 'results.duration_ms : entier positif accepté');
+
+            $pdo->prepare(
+                'INSERT INTO results (user_id, mode, score, duration_ms, school_level)
+                 VALUES (?, ?, ?, ?, ?)'
+            )->execute([$u0, 'addition', 6, null, 'unspecified']);
+            $storedNull = $pdo->query(
+                "SELECT duration_ms FROM results WHERE user_id = {$u0} AND mode = 'addition'"
+            )->fetchColumn();
+            $this->check($storedNull === null, 'results.duration_ms : NULL accepté (durée inconnue)');
+
+            // 3) Durées 0 et négatives refusées par la contrainte CHECK SQL.
+            // NB : SQLite est typé de façon souple ; pour une colonne INTEGER la
+            // CHECK `> 0` rejette de façon fiable 0 et les négatifs. Le typage
+            // STRICT (rejet des décimaux, chaînes numériques "1500", booléens,
+            // textes "nope") est assuré par Validator::durationMs et l'API, qui
+            // n'admettent que des valeurs PHP de type `int` (>0 et <= MAX).
+            $rejectedDurations = 0;
+            foreach ([0, -5] as $badDur) {
+                try {
+                    $pdo->prepare(
+                        'INSERT INTO results (user_id, mode, score, duration_ms)
+                         VALUES (?, ?, ?, ?)'
+                    )->execute([$u0, 'multiplication', 5, $badDur]);
+                } catch (PDOException) {
+                    $rejectedDurations++;
+                }
+            }
+            $this->check($rejectedDurations === 2,
+                'results.duration_ms : 0 et négatifs refusés (CHECK SQL)');
+
+            // 4) Migration d'une base v12.7 : duration_ms ajoutée (NULL), données préservées.
+            $oldRoot = $this->tmpRoot . DIRECTORY_SEPARATOR . 'b2_old_' . uniqid();
+            if (!is_dir($oldRoot)) { @mkdir($oldRoot, 0777, true); }
+            $oldStorage = $oldRoot . DIRECTORY_SEPARATOR . 'storage';
+            if (!is_dir($oldStorage)) { @mkdir($oldStorage, 0777, true); }
+            $oldPath = $oldStorage . DIRECTORY_SEPARATOR . 'calculation-trainer.sqlite';
+            $opdo = new PDO('sqlite:' . $oldPath);
+            $opdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $opdo->exec('PRAGMA foreign_keys = ON');
+            $opdo->exec("CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+                preferred_language TEXT NOT NULL DEFAULT 'fr',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )");
+            $opdo->exec("CREATE TABLE results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                played_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                mode TEXT NOT NULL CHECK (mode IN ('multiplication','addition')),
+                score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
+                guest_id TEXT,
+                question_type TEXT NOT NULL DEFAULT 'classic' CHECK (question_type IN ('classic','hole','mixed')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )");
+            $opdo->prepare('INSERT INTO users (login, password_hash, role) VALUES (?, ?, ?)')
+                ->execute(['old_b2', 'x', 'user']);
+            $oldUid = (int)$opdo->lastInsertId();
+            $opdo->prepare(
+                'INSERT INTO results (user_id, mode, score, played_at, question_type) VALUES (?, ?, ?, ?, ?)'
+            )->execute([$oldUid, 'multiplication', 8, '2024-05-01T10:00:00Z', 'classic']);
+            $oldRid = (int)$opdo->lastInsertId();
+
+            $migDb = new Database($oldRoot);
+            $mpdo = $migDb->pdo();
+            $mCols = array_column($mpdo->query("PRAGMA table_info(results)")->fetchAll(), 'name');
+            $this->check(in_array('duration_ms', $mCols, true), 'Ancien schéma migré : duration_ms ajoutée');
+            $this->check(
+                $mpdo->query("SELECT duration_ms FROM results WHERE id = {$oldRid}")->fetchColumn() === null,
+                'Ancienne partie migrée → duration_ms = NULL (duree inconnue, jamais inventée)'
+            );
+            $oldDurRow = $mpdo->query("SELECT score, played_at, mode, school_level FROM results WHERE id = {$oldRid}")->fetch();
+            $this->check(
+                (int)$oldDurRow['score'] === 8 && $oldDurRow['played_at'] === '2024-05-01T10:00:00Z'
+                    && $oldDurRow['mode'] === 'multiplication' && $oldDurRow['school_level'] === 'unspecified',
+                'Migration durée : scores, dates, modes et niveaux B1 préservés'
+            );
+
+            // 5) Idempotence : second Database sur la même base, sans erreur ni duplicata.
+            $migDb2 = new Database($oldRoot);
+            $mpdo2 = $migDb2->pdo();
+            $count = count(array_column($mpdo2->query("PRAGMA table_info(results)")->fetchAll(), 'name'));
+            $this->check($count === 9, 'Migration durée ré-exécutable : results non remaniée (idempotente)');
+
+            // 6) Index historiques + nouvel index B1 toujours présents.
+            $idx = $mpdo2->query(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_results_%'"
+            )->fetchAll(PDO::FETCH_COLUMN);
+            $this->check(
+                in_array('idx_results_mode_school_score', $idx, true)
+                    && in_array('idx_results_user', $idx, true)
+                    && in_array('idx_results_mode', $idx, true)
+                    && in_array('idx_results_played', $idx, true),
+                'Index historiques + B1 conservés après migration durée'
+            );
+        } catch (Throwable $e) {
+            $this->check(false, 'Durée (v12.8-B2 schema/migration) : ' . $e->getMessage());
+        }
+    }
+
+
+    /**
+     * Enregistrement via ResultService : durée et niveau scolaire historique.
+     * Vérifie que la durée est bien stockée, que NULL est accepté, que les
+     * valeurs invalides sont rejetées, et que le niveau provient du paramètre
+     * SERVEUR (profil authentifié), jamais d'un champ client.
+     */
+    private function testSchoolLevelAndDurationService(): void
+    {
+        echo "[Niveau scolaire historique et durée (service v12.8-B2)]\n";
+        try {
+            $db = new Database($this->tmpRoot);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+
+            // Compte avec un niveau déclaré et un compte sans niveau (NULL).
+            $uidWith = $repo->create([
+                'login' => 'b2_lvl1', 'password' => 'unMotDePasseSûr123', 'role' => 'user',
+            ]);
+            $pdo->exec("UPDATE users SET school_level = 'middle_school' WHERE id = {$uidWith}");
+            $uidNull = $repo->create([
+                'login' => 'b2_lvl0', 'password' => 'unMotDePasseSûr123', 'role' => 'user',
+            ]);
+
+            // 1) Durée valide + niveau du profil (simulé par le paramètre serveur).
+            $rid = $results->save($uidWith, 'multiplication', 9, null, 'classic', 12300, 'middle_school');
+            $row = $pdo->query("SELECT * FROM results WHERE id = {$rid}")->fetch();
+            $this->check((int)$row['duration_ms'] === 12300, 'save : durée valide stockée (ms)');
+            $this->check($row['school_level'] === 'middle_school', 'save : niveau historique du profil stocké');
+
+            // 2) Score et durée enregistrés correctement ensemble.
+            $rid2 = $results->save($uidNull, 'addition', 7, null, 'hole', 9850, 'unspecified');
+            $row2 = $pdo->query("SELECT * FROM results WHERE id = {$rid2}")->fetch();
+            $this->check((int)$row2['score'] === 7 && (int)$row2['duration_ms'] === 9850,
+                'save : score et durée enregistrés correctement');
+            $this->check($row2['school_level'] === 'unspecified',
+                'Compte sans niveau (NULL) -> résultat unspecified');
+
+            // 3) Durée absente -> NULL.
+            $rid3 = $results->save($uidWith, 'addition', 5, null, 'classic', null, 'middle_school');
+            $this->check(
+                $pdo->query("SELECT duration_ms FROM results WHERE id = {$rid3}")->fetchColumn() === null,
+                'save : durée absente -> NULL'
+            );
+
+            // 4) Durées invalides rejetées. Pour la méthode save() (paramètre typé
+            // ?int en strict_types), on ne teste que des entiers hors bornes :
+            // 0, négatif, et > MAX. Les valeurs NON entières (décimale 12.5, chaîne
+            // "1500", booléen) sont rejetées par Validator::durationMs avant d'être
+            // passées (cas API), ce qui est vérifié ci-dessous directement.
+            $rejected = 0;
+            foreach ([0, -1, 1800001] as $badDur) {
+                try {
+                    $results->save($uidWith, 'multiplication', 6, null, 'classic', $badDur, 'middle_school');
+                } catch (InvalidArgumentException) {
+                    $rejected++;
+                }
+            }
+            $this->check($rejected === 3,
+                'save : durées 0 / négative / excessive rejetées (service)');
+
+            // Validator::durationMs refuse strictement les valeurs non entières.
+            $nonInt = [12.5, '1500', false, true, null, 'abc', []];
+            $nonIntRejected = 0;
+            foreach ($nonInt as $v) {
+                if (!Validator::durationMs($v)) {
+                    $nonIntRejected++;
+                }
+            }
+            $this->check($nonIntRejected === count($nonInt),
+                'Validator::durationMs refuse décimaux, chaînes, booléens, null, tableaux');
+
+            // 5) saveWithMission : durée + niveau stockés (transactionnel et idempotent).
+            $svc = new OperationDifficultyService($pdo, new OperationDifficultyRepository($pdo));
+            $results2 = new ResultService($pdo, new ResultRepository($pdo), $svc);
+            $out = $results2->saveWithMission(
+                $uidWith, 'addition', 8, 'mission-b2-0001',
+                [['mode' => 'addition', 'question_type' => 'classic', 'a' => 3, 'b' => 5, 'user_answer' => 8]],
+                null, 'classic', 3200, 'high_school'
+            );
+            $this->check($out['saved'] === true && $out['duplicate'] === false,
+                'saveWithMission : enregistrement réussi');
+            $mrow = $pdo->query("SELECT * FROM results WHERE id = {$out['id']}")->fetch();
+            $this->check((int)$mrow['duration_ms'] === 3200 && $mrow['school_level'] === 'high_school',
+                'saveWithMission : durée et niveau historique stockés');
+
+            // 6) Idempotence + non-rétroactivité : rejeu avec MAUVAISE durée/niveau
+            //    ne remplace PAS les valeurs historiques déjà enregistrées.
+            $out2 = $results2->saveWithMission(
+                $uidWith, 'addition', 8, 'mission-b2-0001',
+                [['mode' => 'addition', 'question_type' => 'classic', 'a' => 3, 'b' => 5, 'user_answer' => 8]],
+                null, 'classic', 9999, 'preschool'
+            );
+            $this->check($out2['duplicate'] === true, 'saveWithMission : rejeu détecté (idempotence)');
+            $mcheck = $pdo->query("SELECT * FROM results WHERE id = {$out['id']}")->fetch();
+            $this->check((int)$mcheck['duration_ms'] === 3200 && $mcheck['school_level'] === 'high_school',
+                'Rejeu : ancienne durée et ancien niveau conservés (non-rétroactivité)');
+        } catch (Throwable $e) {
+            $this->check(false, 'Niveau historique & durée (service v12.8-B2) : ' . $e->getMessage());
+        }
+    }
+
+    // --- v12.8-B4.1 : classement partagé côté serveur ---
+
+    private function testLeaderboardService(): void
+    {
+        echo "[Classement partagé (v12.8-B4.1)]\n";
+        $db = null;
+        try {
+            // Base SQLite TEMPORAIRE isolée (sous-répertoire dédié), comme les autres
+            // tests : aucune base réelle n'est touchée ni aucune donnée partagée.
+            $root = $this->tmpRoot . DIRECTORY_SEPARATOR . 'lb_' . uniqid();
+            mkdir($root, 0775, true);
+            $db = new Database($root);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $lb = new LeaderboardService($pdo);
+
+            $uid = [];
+            $make = function (string $login) use (&$uid, $repo): int {
+                $uid[$login] = $repo->create([
+                    'login' => $login, 'password' => 'motdepasse10', 'role' => 'user',
+                ]);
+                return $uid[$login];
+            };
+
+            // 1. Classement vide : aucun résultat, aucune ligne `users`.
+            $empty = $lb->leaderboard();
+            $this->check($empty['entries'] === [], '1. classement vide (aucune partie)');
+
+            // Jeu de données multi-joueurs.
+            $make('p1'); // meilleur score retenu + meilleure durée à score égal
+            $make('p2'); // score prioritaire sur durée
+            $make('p3'); // durée NULL classée après durée connue, à score égal
+            $make('p4'); // départage par date (même score même durée) + id dernier recours
+            $make('p5'); // apparaît dans deux niveaux scolaires, une seule fois en général
+            $make('inactive1'); // compte désactivé -> exclu
+            $make('inactive2'); // compte désactivé -> exclu
+
+            // p1 : trois parties dans elementary_upper (multiplication, classic).
+            //   - 8/10 en 30000 ms
+            //   - 10/10 en 65000 ms
+            //   - 10/10 en 48000 ms  => meilleur = 10/10 / 48000 ms
+            $results->save($uid['p1'], 'multiplication', 8, '2026-01-01T09:00:00Z', 'classic', 30000, 'elementary_upper');
+            $results->save($uid['p1'], 'multiplication', 10, '2026-01-02T09:00:00Z', 'classic', 65000, 'elementary_upper');
+            $results->save($uid['p1'], 'multiplication', 10, '2026-01-03T09:00:00Z', 'classic', 48000, 'elementary_upper');
+
+            // p2 : 9/10 en 20000 ms (score inférieur => passe derrière p1 malgré la durée).
+            $results->save($uid['p2'], 'multiplication', 9, '2026-01-04T09:00:00Z', 'classic', 20000, 'elementary_upper');
+
+            // p3 : 10/10 SANS durée (durée inconnue) => classé après p1 (durée connue)
+            //      mais avant p2 (score 10 > 9) ; à score égal (10/10), durée NULL
+            //      passe après durée connue.
+            $results->save($uid['p3'], 'multiplication', 10, '2026-01-05T09:00:00Z', 'classic', null, 'elementary_upper');
+
+            // p4 : deux parties identiques 10/10/40000 ms => départage par date puis id.
+            $results->save($uid['p4'], 'multiplication', 10, '2026-01-06T09:00:00Z', 'classic', 40000, 'elementary_upper');
+            $results->save($uid['p4'], 'multiplication', 10, '2026-01-06T09:00:00Z', 'classic', 40000, 'elementary_upper');
+
+            // p5 : deux parties dans DES NIVEAUX DIFFÉRENTS (middle_school et high_school).
+            $results->save($uid['p5'], 'multiplication', 7, '2026-01-07T09:00:00Z', 'classic', 10000, 'middle_school');
+            $results->save($uid['p5'], 'multiplication', 9, '2026-01-08T09:00:00Z', 'classic', 12000, 'high_school');
+
+            // Comptes désactivés avec de très bons scores (doivent être EXCLUS).
+            $results->save($uid['inactive1'], 'multiplication', 10, '2026-01-09T09:00:00Z', 'classic', 1000, 'elementary_upper');
+            $results->save($uid['inactive2'], 'multiplication', 10, '2026-01-10T09:00:00Z', 'classic', 2000, 'elementary_upper');
+            $pdo->exec("UPDATE users SET is_active = 0 WHERE id IN ({$uid['inactive1']}, {$uid['inactive2']})");
+
+            $names = function (array $lb): array {
+                $out = [];
+                foreach ($lb['entries'] as $e) {
+                    $d = $e['duration_ms'] ?? '';
+                    $out[] = "{$e['display_name']}:{$e['score']}:{$d}";
+                }
+                return $out;
+            };
+
+            // 2-10. Classement par niveau (elementary_upper, multiplication, classic) :
+            //      ordre attendu = p4 (10/40000), p1 (10/48000), p3 (10/NULL),
+            //      p2 (9/20000). Les comptes désactivés (inactive1/inactive2, pourtant
+            //      10/10) sont EXCLUS.
+            $byLevel = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $this->check(count($byLevel['entries']) === 4, 'elementary_upper : 4 joueurs (désactivés exclus)');
+            $this->check($names($byLevel) === [
+                'p4:10:40000', 'p1:10:48000', 'p3:10:', 'p2:9:20000',
+            ], 'elementary_upper : meilleur score puis meilleure durée puis durée NULL, score prioritaire');
+
+            // 3/13. Mode addition : aucun résultat, puis une partie addition.
+            $addEmpty = $lb->leaderboard('addition', 'elementary_upper', 'classic', 20);
+            $this->check($addEmpty['entries'] === [], 'mode addition : aucun résultat -> classement vide');
+            $results->save($uid['p4'], 'addition', 8, '2026-01-11T09:00:00Z', 'classic', 15000, 'elementary_upper');
+            $addData = $lb->leaderboard('addition', 'elementary_upper', 'classic', 20);
+            $this->check(count($addData['entries']) === 1 && $addData['entries'][0]['display_name'] === 'p4',
+                'filtre addition : classe uniquement les parties addition');
+
+            // 4. Plusieurs joueurs : une ligne chacun (aucune redondance).
+            $this->check(count($byLevel['entries']) === 4, 'plusieurs joueurs : une ligne chacun');
+
+            // 5/6. Meilleur score retenu : p1 retient 10/48000 (pas 8/30000 ni 10/65000).
+            $p1best = null;
+            foreach ($byLevel['entries'] as $e) {
+                if ($e['display_name'] === 'p1') { $p1best = $e; }
+            }
+            $this->check($p1best !== null && $p1best['score'] === 10 && $p1best['duration_ms'] === 48000,
+                'meilleur score retenu (10/10) et meilleure durée à score égal (48000 ms)');
+
+            // 7. Score prioritaire sur durée : p2 (9/20000) passe derrière p1 (10/48000).
+            $this->check($byLevel['entries'][3]['display_name'] === 'p2', 'score prioritaire sur durée (p2 derrière p1/p3/p4)');
+
+            // 8. Durée NULL classée après durée connue, à score égal : p3 (10/NULL) après p1/p4.
+            $this->check($byLevel['entries'][2]['display_name'] === 'p3', 'durée NULL classée après durée connue à score égal');
+
+            // 9/10. Deux parties strictement identiques (même score/durée/date) -> garde le
+            //       plus petit id : p4 apparaît une seule fois.
+            $p4count = 0;
+            foreach ($byLevel['entries'] as $e) { if ($e['display_name'] === 'p4') { $p4count++; } }
+            $this->check($p4count === 1, 'parties identiques -> une seule apparition (id dernier recours)');
+
+            // 11. Une seule apparition par joueur dans un classement donné.
+            $seen = [];
+            foreach ($byLevel['entries'] as $e) { $seen[$e['display_name']] = ($seen[$e['display_name']] ?? 0) + 1; }
+            $this->check(max($seen) === 1 && count($seen) === 4, 'une seule apparition par joueur');
+
+            // 14/15/16. Filtres de niveau scolaires et 'all'.
+            $mid = $lb->leaderboard('multiplication', 'middle_school', 'classic', 20);
+            $this->check(count($mid['entries']) === 1 && $mid['entries'][0]['display_name'] === 'p5' && $mid['entries'][0]['score'] === 7,
+                'filtre middle_school : p5 (7/10)');
+            $high = $lb->leaderboard('multiplication', 'high_school', 'classic', 20);
+            $this->check(count($high['entries']) === 1 && $high['entries'][0]['display_name'] === 'p5' && $high['entries'][0]['score'] === 9,
+                'filtre high_school : p5 (9/10)');
+            // p5 apparaît dans DEUX classements scolaires différents mais UNE FOIS dans 'all'.
+            $general = $lb->leaderboard('multiplication', 'all', 'classic', 20);
+            $gseen = [];
+            foreach ($general['entries'] as $e) { $gseen[$e['display_name']] = ($gseen[$e['display_name']] ?? 0) + 1; }
+            $this->check(isset($gseen['p5']) && $gseen['p5'] === 1, 'joueur dans plusieurs niveaux -> une seule fois en général');
+            $this->check(count($general['entries']) === 5, 'classement général : 5 joueurs (2 inactifs exclus, p5 une fois)');
+            $this->check($names($general) === [
+                'p4:10:40000', 'p1:10:48000', 'p3:10:', 'p5:9:12000', 'p2:9:20000',
+            ], 'classement général : meilleure partie tous niveaux, tri identique aux classements par niveau');
+
+            // Filtre unspecified : aucune partie non renseignée -> vide.
+            $unsp = $lb->leaderboard('multiplication', 'unspecified', 'classic', 20);
+            $this->check($unsp['entries'] === [], "filtre unspecified : pas de partie non renseignée");
+
+            // 17. Séparation classic / hole / mixed.
+            $results->save($uid['p2'], 'multiplication', 10, '2026-01-12T09:00:00Z', 'hole', 5000, 'elementary_upper');
+            $hole = $lb->leaderboard('multiplication', 'elementary_upper', 'hole', 20);
+            $this->check(count($hole['entries']) === 1 && $hole['entries'][0]['display_name'] === 'p2' && $hole['entries'][0]['score'] === 10,
+                'filtre hole : séparé de classic (p2 10/10 en hole)');
+            $mixed = $lb->leaderboard('multiplication', 'elementary_upper', 'mixed', 20);
+            $this->check($mixed['entries'] === [], 'filtre mixed : séparé, aucune partie');
+            $classicStill = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $this->check(count($classicStill['entries']) === 4, 'classic inchangé par la partie hole (restée sur son type)');
+
+            // 19. Limite respectée.
+            $limit2 = $lb->leaderboard('multiplication', 'all', 'classic', 2);
+            $this->check(count($limit2['entries']) === 2, 'limite 2 respectée');
+
+            // 20. Absence de modification de la base pendant la consultation.
+            $before = (int)$pdo->query('SELECT COUNT(*) FROM results')->fetchColumn();
+            $lb->leaderboard('multiplication', 'all', 'classic', 20);
+            $lb->leaderboard('addition', 'elementary_upper', 'classic', 20);
+            $lb->leaderboard('multiplication', 'middle_school', 'mixed', 5);
+            $after = (int)$pdo->query('SELECT COUNT(*) FROM results')->fetchColumn();
+            $this->check($after === $before, 'la consultation ne modifie pas la base (résultats intacts)');
+
+            // Validation des filtres invalides.
+            $threw = false;
+            try { $lb->leaderboard('soustraction', 'all', 'classic', 20); } catch (InvalidArgumentException) { $threw = true; }
+            $this->check($threw, 'mode inconnu -> InvalidArgumentException');
+            $threw = false;
+            try { $lb->leaderboard('multiplication', 'universite', 'classic', 20); } catch (InvalidArgumentException) { $threw = true; }
+            $this->check($threw, 'niveau inconnu -> InvalidArgumentException');
+            $threw = false;
+            try { $lb->leaderboard('multiplication', 'all', 'quiz', 20); } catch (InvalidArgumentException) { $threw = true; }
+            $this->check($threw, 'type inconnu -> InvalidArgumentException');
+            $threw = false;
+            try { $lb->leaderboard('multiplication', 'all', 'classic', 0); } catch (InvalidArgumentException) { $threw = true; }
+            $this->check($threw, 'limite 0 -> InvalidArgumentException');
+            $threw = false;
+            try { $lb->leaderboard('multiplication', 'all', 'classic', 101); } catch (InvalidArgumentException) { $threw = true; }
+            $this->check($threw, 'limite > 100 -> InvalidArgumentException');
+
+            echo "  -> classement partagé (service) OK\n";
+        } catch (Throwable $e) {
+            $this->check(false, 'Classement partagé (service v12.8-B4.1) : ' . $e->getMessage());
+        }
+    }
 
     private function testResultSave(): void
     {

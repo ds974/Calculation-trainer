@@ -719,6 +719,68 @@ tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
 }
 .leaderboard-headline { margin: 14px 0 12px; text-align: center; }
 
+/* --- B4.2 — Classements : bascule partagé/local et filtres --- */
+.leaderboard-view-switch {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 18px auto 4px;
+}
+.leaderboard-view-btn {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-weight: 750;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+.leaderboard-view-btn.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.leaderboard-view-btn:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+.leaderboard-filters {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 16px 0 4px;
+}
+.filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+.filter-field label {
+  font-weight: 750;
+  font-size: .92rem;
+}
+.leaderboard-filters select {
+  width: 100%;
+  min-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid #9cadb2;
+  border-radius: 11px;
+  background: #f5f8f8;
+  color: var(--text);
+  font: inherit;
+}
+.leaderboard-filters select:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+.leaderboard-filters .select-wrapper select {
+  min-width: 220px;
+}
+
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;

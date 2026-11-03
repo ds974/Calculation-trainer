@@ -17,8 +17,10 @@ declare(strict_types=1);
  *  - profile               (GET)  : profil de l'utilisateur connecté.
  *  - profile/password      (POST) : modification du mot de passe.
  *  - profile/language      (POST) : modification de la préférence linguistique.
+ *  - profile/school-level  (POST) : modification du niveau scolaire (v12.8-B3.1).
  *  - result/save           (POST) : enregistre une partie terminée (connecté).
  *  - result/history        (GET)  : historique des parties de l'utilisateur connecté.
+ *  - leaderboard           (GET)  : classement partagé serveur (public, v12.8-B4.1).
  *  - stats                 (GET)  : statistiques personnelles d'un mode (connecté).
  *  - difficulty/operations (GET)  : opérations non maîtrisées de l'utilisateur
  *                                   connecté (v12.5, missions adaptatives).
@@ -71,6 +73,8 @@ try {
     $difficulty = new OperationDifficultyService($db->pdo(), $difficultyRepository);
     $results = new ResultService($db->pdo(), $resultRepository, $difficulty);
     $stats = new StatsService($resultRepository);
+    // v12.8-B4.1 — classement partagé côté serveur (lecture seule, public).
+    $leaderboard = new LeaderboardService($db->pdo());
     $adminRepository = new AdminRepository($db->pdo());
     $admin = new AdminService($db->pdo(), $auth, $users, $adminRepository);
 
@@ -106,6 +110,13 @@ try {
             ];
             if (isset($parsed['preferred_language'])) {
                 $reg['preferred_language'] = (string)$parsed['preferred_language'];
+            }
+            // Niveau scolaire OPTIONNEL à l'inscription (v12.8-B3.1). On ne l'ajoute
+            // que s'il est réellement présent dans le corps (y compris un null
+            // explicite => « Non renseigné »), afin de laisser AuthService gérer
+            // l'absence et la validation. Le champ n'est jamais obligatoire.
+            if (array_key_exists('school_level', $parsed)) {
+                $reg['school_level'] = $parsed['school_level'];
             }
             $user = $auth->register($reg);
             Response::success(['user' => $user], 201);
@@ -166,6 +177,35 @@ try {
             Response::success(['user' => $user]);
             break;
 
+        case 'profile/school-level':
+            // Modification du niveau scolaire du compte connecté (v12.8-B3.1).
+            // Seul le compte de la session est modifiable ; le niveau est validé
+            // de manière stricte (six identifiants stables, ou null pour « Non
+            // renseigné »). Un niveau fourni n'affecte aucune autre donnée et ne
+            // modifie jamais le niveau HISTORIQUE des parties déjà enregistrées.
+            Security::verifyPost($method, (string)($parsed['csrf_token'] ?? ''));
+            $user = $auth->currentUser();
+            if ($user === null) {
+                Response::error('Authentification requise.', 401);
+            }
+            // `school_level` est EXIGÉ : sa présence est requise pour cet endpoint
+            // dédié. Il peut être JSON `null` (« Non renseigné ») ou une chaîne parmi
+            // les six identifiants. Une absence (clé non fournie) est refusée en 400.
+            if (!array_key_exists('school_level', $parsed)) {
+                Response::error('Le champ school_level est requis.', 400);
+            }
+            $newLevel = $parsed['school_level'];
+            if ($newLevel !== null && !is_string($newLevel)) {
+                Response::error(
+                    'Niveau scolaire non reconnu. Valeurs acceptées : '
+                    . implode(', ', Validator::allowedSchoolLevels()) . ', ou null.',
+                    400
+                );
+            }
+            $user = $auth->changeSchoolLevel((int)$user['id'], $newLevel);
+            Response::success(['user' => $user]);
+            break;
+
         case 'result/save':
             // Enregistre une partie terminée pour l'utilisateur connecté.
             // v12.4 : si le client fournit un `mission_id` stable et le détail
@@ -183,6 +223,35 @@ try {
                 ? $parsed['played_at']
                 : null;
 
+            // v12.8-B2 — durée de la partie en millisecondes (optionnelle).
+            // - champ ABSENT ou JSON null  => durée inconnue (NULL) : rétrocompatibilité.
+            // - entier strictement positif => enregistré tel quel.
+            // - toute autre valeur (chaîne "null", décimale, booléen, 0, négatif,
+            //   démesuré) est REJETÉE : on ne confond jamais la chaîne "null" avec
+            //   la valeur JSON null.
+            $durationMs = null;
+            if (array_key_exists('duration_ms', $parsed) && $parsed['duration_ms'] !== null) {
+                if (!is_int($parsed['duration_ms'])
+                    || !Validator::durationMs($parsed['duration_ms'])) {
+                    Response::error(
+                        'Durée de partie invalide (entier strictement positif en millisecondes attendu).',
+                        400
+                    );
+                }
+                $durationMs = (int)$parsed['duration_ms'];
+            }
+
+            // v12.8-B2 — niveau scolaire HISTORIQUE figé à l'enregistrement.
+            // Il est lu FRAÎCHEMENT depuis la base (jamais d'un champ client) pour
+            // éviter de dépendre d'un objet de session périmé. Un profil sans niveau
+            // (NULL) aboutit à 'unspecified' sur la ligne de résultat.
+            $freshUser = $users->findById((int)$user['id']);
+            $schoolLevel = ($freshUser !== null
+                    && isset($freshUser['school_level'])
+                    && $freshUser['school_level'] !== null)
+                ? (string)$freshUser['school_level']
+                : 'unspecified';
+
             $hasMission = isset($parsed['mission_id']) && is_string($parsed['mission_id'])
                 && trim($parsed['mission_id']) !== ''
                 && isset($parsed['details']) && is_array($parsed['details']);
@@ -195,7 +264,9 @@ try {
                     (string)$parsed['mission_id'],
                     $parsed['details'],
                     $playedAt,
-                    (string)($parsed['question_type'] ?? 'classic')
+                    (string)($parsed['question_type'] ?? 'classic'),
+                    $durationMs,
+                    $schoolLevel
                 );
                 if ($outcome['duplicate']) {
                     // Mission déjà enregistrée : réponse de succès cohérente au
@@ -213,7 +284,9 @@ try {
                 (string)($parsed['mode'] ?? ''),
                 (int)($parsed['score'] ?? -1),
                 $playedAt,
-                (string)($parsed['question_type'] ?? 'classic')
+                (string)($parsed['question_type'] ?? 'classic'),
+                $durationMs,
+                $schoolLevel
             );
             Response::success(['result' => ['id' => $resultId]], 201);
             break;
@@ -244,6 +317,55 @@ try {
             $statsData = $stats->stats((int)$user['id'], $mode);
             $statsData['difficulty'] = $results->difficultySummary((int)$user['id']);
             Response::success($statsData);
+            break;
+
+        case 'leaderboard':
+            // v12.8-B4.1 — classement partagé côté serveur (lecture seule, PUBLIC :
+            // aucun compte requis, aucune protection CSRF sur un GET). Seuls les
+            // comptes actifs apparaissent ; les parties invitées et les comptes
+            // désactivés sont exclus. Aucune donnée privée n'est renvoyée.
+            // Les valeurs par défaut : mode=multiplication, niveau=all,
+            // type=classic, limit=20.
+            $lbMode = isset($_GET['mode']) && is_string($_GET['mode'])
+                ? $_GET['mode']
+                : (string)($parsed['mode'] ?? '');
+            if ($lbMode === '') {
+                $lbMode = 'multiplication';
+            }
+            $lbLevel = isset($_GET['school_level']) && is_string($_GET['school_level'])
+                ? $_GET['school_level']
+                : (string)($parsed['school_level'] ?? '');
+            if ($lbLevel === '') {
+                $lbLevel = 'all';
+            }
+            $lbType = isset($_GET['question_type']) && is_string($_GET['question_type'])
+                ? $_GET['question_type']
+                : (string)($parsed['question_type'] ?? '');
+            if ($lbType === '') {
+                $lbType = 'classic';
+            }
+            $lbLimit = 20;
+            if ((isset($_GET['limit']) && $_GET['limit'] !== '')
+                || (isset($parsed['limit']) && $parsed['limit'] !== '')) {
+                $rawLimit = isset($_GET['limit']) ? $_GET['limit'] : $parsed['limit'];
+                $intLimit = filter_var($rawLimit, FILTER_VALIDATE_INT);
+                if ($intLimit === false) {
+                    Response::error('Limite invalide.', 400);
+                }
+                $lbLimit = (int)$intLimit;
+            }
+            // Validation centralisée (mode, niveau, type, bornes de limite) ;
+            // chaque échec renvoie HTTP 400. La requête est préparée côté service.
+            // Contrat : `filters` (mode/niveau/type appliqués) + `entries` classées.
+            $lbResult = $leaderboard->leaderboard($lbMode, $lbLevel, $lbType, $lbLimit);
+            Response::success([
+                'filters' => [
+                    'mode'          => $lbMode,
+                    'school_level'  => $lbLevel,
+                    'question_type' => $lbType,
+                ],
+                'entries' => $lbResult['entries'],
+            ]);
             break;
 
         case 'difficulty/operations':

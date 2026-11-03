@@ -121,19 +121,30 @@ final class Database
                 role               TEXT NOT NULL DEFAULT 'user'
                                    CHECK (role IN ('user', 'admin')),
                 preferred_language TEXT NOT NULL DEFAULT 'fr',
+                school_level       TEXT
+                                   CHECK (school_level IS NULL
+                                          OR school_level IN ('preschool', 'elementary_lower',
+                                                              'elementary_upper', 'middle_school',
+                                                              'high_school', 'higher_adult')),
                 created_at         TEXT NOT NULL
                                    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS results (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id    INTEGER NOT NULL,
-                played_at  TEXT NOT NULL
-                           DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                mode       TEXT NOT NULL
-                           CHECK (mode IN ('multiplication', 'addition')),
-                score      INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
-                guest_id   TEXT,
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL,
+                played_at    TEXT NOT NULL
+                             DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                mode         TEXT NOT NULL
+                             CHECK (mode IN ('multiplication', 'addition')),
+                score        INTEGER NOT NULL CHECK (score BETWEEN 0 AND 10),
+                guest_id     TEXT,
+                duration_ms  INTEGER
+                             CHECK (duration_ms IS NULL OR duration_ms > 0),
+                school_level TEXT NOT NULL DEFAULT 'unspecified'
+                             CHECK (school_level IN ('preschool', 'elementary_lower',
+                                                     'elementary_upper', 'middle_school',
+                                                     'high_school', 'higher_adult', 'unspecified')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )");
 
@@ -153,9 +164,42 @@ final class Database
                         CHECK (question_type IN ('classic', 'hole', 'mixed'))");
         }
 
+        // Migration v12.8 (idempotente, non destructive) : niveau scolaire figé sur la
+        // partie. Ajoute la colonne school_level (NOT NULL DEFAULT 'unspecified') aux bases
+        // créées avant v12.8. Une partie possède TOUJOURS un niveau historique ; les parties
+        // déjà enregistrées sont migrées vers 'unspecified'. Aucun score, timestamp, mode
+        // ou identifiant existant n'est modifié. Cette colonne sera alimentée côté serveur
+        // (étape B2) depuis le profil authentifié, et jamais déduite d'informations actuelles.
+        if (is_array($resultsCols) && !in_array('school_level', $resultsCols, true)) {
+            $pdo->exec("ALTER TABLE results ADD COLUMN school_level TEXT NOT NULL DEFAULT 'unspecified'
+                        CHECK (school_level IN ('preschool', 'elementary_lower',
+                                                'elementary_upper', 'middle_school',
+                                                'high_school', 'higher_adult', 'unspecified'))");
+        }
+
+        // Migration v12.8 (idempotente, non destructive) : durée de la partie en
+        // millisecondes. durée NULL = inconnue (résultats historiques ou clients
+        // anciens). Une durée présente doit être un entier strictement positif ;
+        // on n'invente JAMAIS de durée pour les anciennes parties. Aucun score,
+        // timestamp, mode, niveau ou identifiant existant n'est modifié, et la
+        // colonne school_level de B1 est laissée intacte.
+        if (is_array($resultsCols) && !in_array('duration_ms', $resultsCols, true)) {
+            $pdo->exec("ALTER TABLE results ADD COLUMN duration_ms INTEGER
+                        CHECK (duration_ms IS NULL OR duration_ms > 0)");
+        }
+
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_mode ON results(mode)');
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_results_played ON results(played_at)');
+
+        // Index v12.8 pour le classement partagé : filtre par mode ET par niveau scolaire,
+        // puis recherche des meilleurs scores. Utile pour le Top par (mode, niveau) et pour
+        // le classement général. La colonne played_at n'y figure pas : elle ne suffit pas à
+        // départager les égalités par temps de jeu (voir analyse B1, §10A).
+        $pdo->exec(
+            'CREATE INDEX IF NOT EXISTS idx_results_mode_school_score
+             ON results(mode, school_level, score DESC)'
+        );
 
         // Index unique partiel : un même guest_id (partie invitée) ne peut être
         // importé qu'une seule fois par utilisateur => idempotence de l'import.
@@ -181,6 +225,21 @@ final class Database
         // Valeur par défaut 'fr' pour les comptes existants ; aucune donnée ne change.
         if (is_array($usersCols) && !in_array('preferred_language', $usersCols, true)) {
             $pdo->exec("ALTER TABLE users ADD COLUMN preferred_language TEXT NOT NULL DEFAULT 'fr'");
+        }
+
+        // --- Migration v12.8 (idempotente, non destructive) : niveau scolaire du profil.
+        // Ajoute la colonne school_level (NULL = « Non renseigné ») aux bases créées avant
+        // v12.8. Tous les comptes existants reçoivent implicitement NULL : aucune valeur
+        // par défaut de niveau scolaire n'est appliquée. Seuls les six identifiants
+        // scolaires stables sont acceptés lorsqu'une valeur non NULL est présente ;
+        // 'unspecified' n'est jamais stocké comme niveau de profil (l'absence s'exprime
+        // par NULL).
+        if (is_array($usersCols) && !in_array('school_level', $usersCols, true)) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN school_level TEXT CHECK (
+                            school_level IS NULL
+                            OR school_level IN ('preschool', 'elementary_lower',
+                                                'elementary_upper', 'middle_school',
+                                                'high_school', 'higher_adult'))");
         }
 
         // Table de limitation des tentatives de connexion (anti brute-force).

@@ -402,6 +402,203 @@ $histBobJ = json_decode($histBob, true);
 $histBobCount = is_array($histBobJ) && is_array($histBobJ['data']['history'] ?? null) ? count($histBobJ['data']['history']) : -1;
 expect('bob ne voit pas l\'historique d\'alice', $code === 200 && $histBobCount === 0, "HTTP {$code} (nb={$histBobCount})");
 
+// ---------------------------------------------------------------------------
+// v12.8-B2 — durée (duration_ms) et niveau scolaire HISTORIQUE dans result/save.
+// Compte isolé « carol ». On vérifie les valeurs réellement stockées en SQLite
+// (lecture directe), pas seulement les réponses HTTP.
+// ---------------------------------------------------------------------------
+$jarCarol = sys_get_temp_dir() . "/calc_trainer_jar_b2dur_{$port}.txt";
+[$code] = get_call("{$base}?action=auth/csrf", $jarCarol);
+[$code, $csrfBodyCarol] = get_call("{$base}?action=auth/csrf", $jarCarol);
+$csrfCarol = json_decode($csrfBodyCarol, true);
+$tokenCarol = is_array($csrfCarol) ? (string)($csrfCarol['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'b2dur', 'password' => 'secretpass123', 'csrf_token' => $tokenCarol], $jarCarol);
+expect('register b2dur => 201', $code === 201, "HTTP {$code}");
+[$code, $logCarol] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'b2dur', 'password' => 'secretpass123', 'csrf_token' => $tokenCarol], $jarCarol);
+$logCarolJ = json_decode($logCarol, true);
+expect('login b2dur => 200', $code === 200 && isset($logCarolJ['data']['user']), "HTTP {$code}");
+[$code, $csrfBodyC2] = get_call("{$base}?action=auth/csrf", $jarCarol);
+$csrfC2 = json_decode($csrfBodyC2, true);
+$tokenC2 = is_array($csrfC2) ? (string)($csrfC2['data']['token'] ?? '') : '';
+
+// 1. Durée valide => 201, et valeur stockée en base.
+[$code] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'multiplication', 'score' => 9,
+    'duration_ms' => 12340, 'csrf_token' => $tokenC2,
+], $jarCarol);
+expect('result/save avec durée valide => 201', $code === 201, "HTTP {$code}");
+
+// 2. Client fournissant un school_level arbitraire : IGNORÉ (le niveau provient
+//    du profil authentifié ; b2dur n'ayant pas de niveau, la partie est unspecified).
+[$code] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'addition', 'score' => 6,
+    'duration_ms' => 8000, 'school_level' => 'high_school', 'csrf_token' => $tokenC2,
+], $jarCarol);
+expect('result/save avec school_level client arbitraire => 201', $code === 201, "HTTP {$code}");
+
+// 3. Durée absente (ancien client) => 201, NULL en base.
+[$code] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'addition', 'score' => 5, 'csrf_token' => $tokenC2,
+], $jarCarol);
+expect('result/save sans durée (rétrocompat) => 201', $code === 201, "HTTP {$code}");
+
+// 4. Durée JSON null => 201, NULL en base (compatibilité, distinct de "null").
+[$code] = http_call('POST', $base, [
+    'action' => 'result/save', 'mode' => 'addition', 'score' => 4,
+    'duration_ms' => null, 'csrf_token' => $tokenC2,
+], $jarCarol);
+expect('result/save avec duration_ms null (JSON) => 201', $code === 201, "HTTP {$code}");
+
+// 5. Durées invalides => 400 : 0, négative, décimale (chaîne "12.5"), chaîne "1500",
+//    chaîne "null" (à ne PAS confondre avec JSON null), booléen, excessive.
+$badDurations = [0, -1, 12.5, "1500", "null", true, "abc", 1800001];
+$badDurRejected = 0;
+foreach ($badDurations as $bd) {
+    [$c] = http_call('POST', $base, [
+        'action' => 'result/save', 'mode' => 'multiplication', 'score' => 7,
+        'duration_ms' => $bd, 'csrf_token' => $tokenC2,
+    ], $jarCarol);
+    if ($c === 400) { $badDurRejected++; }
+}
+expect('result/save durées invalides (0/négatif/décimal/chaîne/null-string/bool/excessif) => 400',
+    $badDurRejected === count($badDurations), "rejetés {$badDurRejected}/" . count($badDurations));
+
+// 6. Vérifications SQLite des valeurs réellement stockées.
+$b2Pdo = new PDO('sqlite:' . $storageOverride . '/calculation-trainer.sqlite', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+]);
+$b2Pdo->exec('PRAGMA busy_timeout = 5000');
+$b2Pdo->exec('PRAGMA foreign_keys = ON');
+$b2durId = (int)$b2Pdo->query("SELECT id FROM users WHERE login = 'b2dur'")->fetchColumn();
+$rows = $b2Pdo->prepare(
+    'SELECT mode, score, duration_ms, school_level FROM results WHERE user_id = :id ORDER BY id'
+);
+$rows->execute(['id' => $b2durId]);
+$b2durRows = $rows->fetchAll(PDO::FETCH_ASSOC);
+$b2Pdo = null;
+expect('B2 : 4 parties stockées pour b2dur', count($b2durRows) === 4, "nb=" . count($b2durRows));
+// Première partie (durée valide) : durée stockée, niveau unspecified (profil sans niveau).
+expect('B2 : durée valide stockée dans SQLite',
+    (int)$b2durRows[0]['duration_ms'] === 12340, (string)$b2durRows[0]['duration_ms']);
+expect('B2 : school_level client IGNORÉ -> unspecified (niveau du profil)',
+    $b2durRows[1]['school_level'] === 'unspecified', (string)$b2durRows[1]['school_level']);
+// Deuxième partie : durée 8000 stockée.
+expect('B2 : durée 8000 stockée pour la 2e partie',
+    (int)$b2durRows[1]['duration_ms'] === 8000, (string)$b2durRows[1]['duration_ms']);
+// Troisième et quatrième parties : durée absente / null => NULL en base.
+expect('B2 : durée absente -> NULL en base',
+    $b2durRows[2]['duration_ms'] === null, var_export($b2durRows[2]['duration_ms'], true));
+expect('B2 : duration_ms null (JSON) -> NULL en base',
+    $b2durRows[3]['duration_ms'] === null, var_export($b2durRows[3]['duration_ms'], true));
+
+// 7. CSRF : result/save sans jeton => 403.
+[$code] = http_call('POST', $base, ['action' => 'result/save', 'mode' => 'multiplication', 'score' => 5], $jarCarol);
+expect('result/save sans CSRF => 403', $code === 403, "HTTP {$code}");
+
+// ---------------------------------------------------------------------------
+// v12.8-B3.1 — niveau scolaire dans le profil : inscription, profil, mise à jour,
+// validation stricte, CSRF, isolation et non-rétroactivité.
+// ---------------------------------------------------------------------------
+$jarSL = sys_get_temp_dir() . "/calc_trainer_jar_sl_{$port}.txt";
+$ctxSL = static function () use ($base, $jarSL): array {
+    [$c, $b] = get_call("{$base}?action=auth/csrf", $jarSL);
+    $j = json_decode($b, true);
+    return [$c, is_array($j) ? (string)($j['data']['token'] ?? '') : ''];
+};
+[$code, $tokSL] = $ctxSL();
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'niveau_user', 'password' => 'secretpass123', 'csrf_token' => $tokSL], $jarSL);
+expect('B3.1 register sans niveau => 201', $code === 201, "HTTP {$code}");
+[$code, $logSL] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'niveau_user', 'password' => 'secretpass123', 'csrf_token' => $tokSL], $jarSL);
+expect('B3.1 login niveau_user => 200', $code === 200, "HTTP {$code}");
+
+// 1. Profil : school_level absent => null.
+[$code, $profSL] = get_call("{$base}?action=profile", $jarSL);
+$profSLJ = json_decode($profSL, true);
+$level0 = isset($profSLJ['data']['user']['school_level']) ? $profSLJ['data']['user']['school_level'] : '(absent)';
+expect('B3.1 profil : school_level null (Non renseigné) par défaut', $profSLJ['data']['user']['school_level'] === null, var_export($level0, true));
+
+// 2. Inscription avec niveau valide + profil le renvoit.
+$jarSL2 = sys_get_temp_dir() . "/calc_trainer_jar_sl2_{$port}.txt";
+[$c, $b2] = get_call("{$base}?action=auth/csrf", $jarSL2);
+$tokSL2 = is_array(json_decode($b2, true)) ? (string)(json_decode($b2, true)['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'claire_niveau', 'password' => 'secretpass123', 'school_level' => 'middle_school', 'preferred_language' => 'en', 'csrf_token' => $tokSL2], $jarSL2);
+expect('B3.1 register avec niveau middle_school => 201', $code === 201, "HTTP {$code}");
+[$code, $logSL2] = http_call('POST', $base, ['action' => 'auth/login', 'login' => 'claire_niveau', 'password' => 'secretpass123', 'csrf_token' => $tokSL2], $jarSL2);
+[$code, $profSL2] = get_call("{$base}?action=profile", $jarSL2);
+$profSL2J = json_decode($profSL2, true);
+expect('B3.1 profil renvoie middle_school', ($profSL2J['data']['user']['school_level'] ?? null) === 'middle_school', var_export($profSL2J['data']['user']['school_level'] ?? null, true));
+expect('B3.1 preferred_language compat (en) préservée', ($profSL2J['data']['user']['preferred_language'] ?? '') === 'en', '');
+
+// 3. Inscription avec niveau invalide => 400 (compte non créé).
+$jarSLbad = sys_get_temp_dir() . "/calc_trainer_jar_slbad_{$port}.txt";
+[$c, $b3] = get_call("{$base}?action=auth/csrf", $jarSLbad);
+$tokSLbad = is_array(json_decode($b3, true)) ? (string)(json_decode($b3, true)['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'auth/register', 'login' => 'bad_niveau', 'password' => 'secretpass123', 'school_level' => 'CP', 'csrf_token' => $tokSLbad], $jarSLbad);
+expect('B3.1 register niveau invalide "CP" => 400', $code === 400, "HTTP {$code}");
+
+// 4. POST profile/school-level : chacune des six catégories acceptée.
+$six = ['preschool', 'elementary_lower', 'elementary_upper', 'middle_school', 'high_school', 'higher_adult'];
+$okCount = 0;
+foreach ($six as $lvl) {
+    [$code, $resSL] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => $lvl, 'csrf_token' => $tokSL], $jarSL);
+    $resJ = json_decode($resSL, true);
+    if ($code === 200 && ($resJ['data']['user']['school_level'] ?? null) === $lvl) { $okCount++; }
+}
+expect('B3.1 les six catégories modifiables via POST', $okCount === 6, "ok {$okCount}/6");
+
+// 5. Retour à null (« Non renseigné »).
+[$code, $resNull] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => null, 'csrf_token' => $tokSL], $jarSL);
+$resNullJ = json_decode($resNull, true);
+expect('B3.1 retour school_level null => 200',
+    $code === 200 && array_key_exists('school_level', $resNullJ['data']['user'] ?? []) && $resNullJ['data']['user']['school_level'] === null,
+    "HTTP {$code}");
+
+// 6. Valeurs invalides refusées (unspecified, chaîne vide, arbitraire, types).
+$badSL = ['unspecified', '', 'collège', 5, true, ['a'], 12.5, 'CE1'];
+$badRej = 0;
+foreach ($badSL as $bv) {
+    [$c] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => $bv, 'csrf_token' => $tokSL], $jarSL);
+    if ($c === 400) { $badRej++; }
+}
+expect('B3.1 valeurs scolaires invalides refusées (unspecified/vide/arbitraire/types)', $badRej === count($badSL), "rejetés {$badRej}/" . count($badSL));
+
+// 7. School_level totalement absent de la requête => 400 (endpoint traite le niveau).
+[$code] = http_call('POST', $base, ['action' => 'profile/school-level', 'csrf_token' => $tokSL], $jarSL);
+expect('B3.1 school_level absent => 400', $code === 400, "HTTP {$code}");
+
+// 8. Sans authentification => 401.
+$jarSLanon = sys_get_temp_dir() . "/calc_trainer_jar_slanon_{$port}.txt";
+[$c, $bAn] = get_call("{$base}?action=auth/csrf", $jarSLanon);
+$tokAn = is_array(json_decode($bAn, true)) ? (string)(json_decode($bAn, true)['data']['token'] ?? '') : '';
+[$code] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => 'high_school', 'csrf_token' => $tokAn], $jarSLanon);
+expect('B3.1 profile/school-level sans connexion => 401', $code === 401, "HTTP {$code}");
+
+// 9. Sans CSRF => 403.
+[$code] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => 'preschool'], $jarSL);
+expect('B3.1 profile/school-level sans CSRF => 403', $code === 403, "HTTP {$code}");
+
+// 10. Impossible de modifier un AUTRE compte via un user_id transmis par le client.
+[$code, $resSL] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => 'high_school', 'user_id' => 999999, 'csrf_token' => $tokSL], $jarSL);
+$resSLJ = json_decode($resSL, true);
+// Le champ user_id doit être ignoré : le niveau du compte connecté change, pas celui d'un autre.
+expect('B3.1 user_id client ignoré (modifie le compte de session)',
+    $code === 200 && ($resSLJ['data']['user']['school_level'] ?? null) === 'high_school',
+    "HTTP {$code} " . var_export($resSLJ['data']['user']['school_level'] ?? null, true));
+[$code, $profSLcheck] = get_call("{$base}?action=profile", $jarSL2);
+$profSLcheckJ = json_decode($profSLcheck, true);
+expect('B3.1 le niveau d\'un autre compte est intact',
+    ($profSLcheckJ['data']['user']['school_level'] ?? null) === 'middle_school',
+    var_export($profSLcheckJ['data']['user']['school_level'] ?? null, true));
+
+// 11. Non-rétroactivité : aucun résultat n'est écrit lors des changements de niveau
+//     du profil, et le niveau d'une partie reste son niveau HISTORIQUE figé.
+$b3pdo = new PDO('sqlite:' . $storageOverride . '/calculation-trainer.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$b3pdo->exec('PRAGMA busy_timeout = 5000');
+$slUid = (int)$b3pdo->query("SELECT id FROM users WHERE login = 'niveau_user'")->fetchColumn();
+$countRes = (int)$b3pdo->query("SELECT COUNT(*) FROM results WHERE user_id = {$slUid}")->fetchColumn();
+$b3pdo = null;
+expect('B3.1 aucun résultat écrit par les changements de niveau (non-rétroactivité)', $countRes === 0, "nb={$countRes}");
+
 echo "\n=== Test HTTP — statistiques personnelles (étape 6) ===\n";
 
 // Une toute nouvelle session (jar vide) sans connexion => 401.
@@ -891,6 +1088,221 @@ expect('session déjà ouverte d\'un compte désactivé => profil refusé (401)'
 expect('session déjà ouverte (désactivé) => admin/users refusé (401)', $code === 401, "HTTP {$code}");
 [$code] = get_call("{$base}?action=stats&mode=multiplication", $jar);
 expect('session déjà ouverte (désactivé) => stats refusé (401)', $code === 401, "HTTP {$code}");
+
+
+
+// =====================================================================
+// v12.8-B4.1 — classement partagé côté serveur (GET, public).
+// Comptes isolés dédiés pour ne pas perturber les tests précédents.
+// Les parties sont enregistrées via result/save (le serveur fige le niveau
+// scolaire historique DEPUIS LE PROFIL) : on règle donc d'abord le niveau de
+// chaque compte, puis on enregistre plusieurs parties avec durée et date.
+echo "\n=== Test HTTP — classement partagé côté serveur (v12.8-B4.1) ===\n";
+
+$mkLb = static function (string $login, string $password, int $port) use ($base): array {
+    $jarU = sys_get_temp_dir() . "/calc_trainer_jar_lb_{$login}_{$port}.txt";
+    register_shutdown_function(static function () use ($jarU): void { @unlink($jarU); });
+    [$c, $b] = get_call("{$base}?action=auth/csrf", $jarU);
+    $j = json_decode($b, true);
+    $token = is_array($j) ? (string)($j['data']['token'] ?? '') : '';
+    http_call('POST', $base, ['action' => 'auth/register', 'login' => $login, 'password' => $password, 'csrf_token' => $token], $jarU);
+    http_call('POST', $base, ['action' => 'auth/login', 'login' => $login, 'password' => $password, 'csrf_token' => $token], $jarU);
+    [$c, $b] = get_call("{$base}?action=auth/csrf", $jarU);
+    $j = json_decode($b, true);
+    $token2 = is_array($j) ? (string)($j['data']['token'] ?? '') : '';
+    return [$jarU, $token2];
+};
+$lbSave = static function (string $base, string $jarU, string $token, string $mode, int $score, ?int $durationMs, string $playedAt, string $qt = 'classic', ?string $mid = null): int {
+    $body = [
+        'action' => 'result/save', 'mode' => $mode, 'score' => $score,
+        'question_type' => $qt, 'csrf_token' => $token,
+    ];
+    if ($playedAt !== '') { $body['played_at'] = $playedAt; }
+    if ($durationMs !== null) { $body['duration_ms'] = $durationMs; }
+    if ($mid !== null) { $body['mission_id'] = $mid; }
+    [$code, $b] = http_call('POST', $base, $body, $jarU);
+    $j = json_decode($b, true);
+    return $code === 201 ? (int)($j['data']['result']['id'] ?? 0) : 0;
+};
+$lbSetLevel = static function (string $base, string $jarU, string $token, ?string $level): bool {
+    [$code] = http_call('POST', $base, ['action' => 'profile/school-level', 'school_level' => $level, 'csrf_token' => $token], $jarU);
+    return $code === 200;
+};
+
+// Cookie jar anonyme (vierge) pour les consultations PUBLIQUES du classement :
+// aucun compte ni session ne sont requis.
+$jarLbAnon = sys_get_temp_dir() . "/calc_trainer_jar_lb_anon_{$port}.txt";
+register_shutdown_function(static function () use ($jarLbAnon): void { @unlink($jarLbAnon); });
+
+// ---- Comptes isolés ----
+[$jarLbA, $tokLbA] = $mkLb('lb_alpha', 'lbpass12345', $port);
+[$jarLbB, $tokLbB] = $mkLb('lb_beta', 'lbpass12345', $port);
+[$jarLbC, $tokLbC] = $mkLb('lb_gamma', 'lbpass12345', $port);
+[$jarLbD, $tokLbD] = $mkLb('lb_delta', 'lbpass12345', $port);
+[$jarLbI, $tokLbI] = $mkLb('lb_inactive', 'lbpass12345', $port);
+
+// Niveaux scolaires des comptes.
+expect('lb_alpha -> elementary_upper', $lbSetLevel($base, $jarLbA, $tokLbA, 'elementary_upper'), '');
+expect('lb_beta -> elementary_upper', $lbSetLevel($base, $jarLbB, $tokLbB, 'elementary_upper'), '');
+expect('lb_gamma -> elementary_upper', $lbSetLevel($base, $jarLbC, $tokLbC, 'elementary_upper'), '');
+expect('lb_delta -> high_school', $lbSetLevel($base, $jarLbD, $tokLbD, 'high_school'), '');
+expect('lb_inactive -> elementary_upper', $lbSetLevel($base, $jarLbI, $tokLbI, 'elementary_upper'), '');
+
+// Parties (multiplication, classic, elementary_upper pour A/B/C).
+// lb_alpha : 8/10 en 30000, puis 10/10 en 65000, puis 10/10 en 48000
+//            -> meilleur retenu = 10/48000.
+$lbSave($base, $jarLbA, $tokLbA, 'multiplication', 8, 30000, '2026-01-01T09:00:00Z');
+$lbSave($base, $jarLbA, $tokLbA, 'multiplication', 10, 65000, '2026-01-02T09:00:00Z');
+$lbSave($base, $jarLbA, $tokLbA, 'multiplication', 10, 48000, '2026-01-03T09:00:00Z');
+// lb_beta : 9/10 en 20000 -> derrière alpha (score prioritaire).
+$lbSave($base, $jarLbB, $tokLbB, 'multiplication', 9, 20000, '2026-01-04T09:00:00Z');
+// lb_gamma : 10/10 SANS durée -> après alpha mais avant beta.
+$lbSave($base, $jarLbC, $tokLbC, 'multiplication', 10, null, '2026-01-05T09:00:00Z');
+// lb_delta (high_school) : 9/10 en 12000.
+$lbSave($base, $jarLbD, $tokLbD, 'multiplication', 9, 12000, '2026-01-08T09:00:00Z');
+// lb_inactive : excellent 10/10 en 1000 -> DOIT être exclu du classement.
+$lbSave($base, $jarLbI, $tokLbI, 'multiplication', 10, 1000, '2026-01-09T09:00:00Z');
+
+// Désactivation RÉELLE du compte lb_inactive (soft delete) directement dans la
+// base SQLite jetable, comme le fait le banc admin (aucun impact en production).
+// Sans cette étape, is_active vaut encore 1 : le compte ne serait pas exclu.
+$deactPdo = new PDO('sqlite:' . $storageOverride . '/calculation-trainer.sqlite', null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+]);
+$stmt = $deactPdo->prepare("UPDATE users SET is_active = 0 WHERE login = :l");
+$stmt->execute(['l' => 'lb_inactive']);
+$deactPdo = null;
+
+
+
+
+// ---- 1. GET public sans authentification ----
+[$code, $lbBody] = get_call("{$base}?action=leaderboard", $jarLbAnon);
+$lbJ = json_decode($lbBody, true);
+expect('leaderboard GET sans authentification => 200 (public, aucune session requise)', $code === 200, "HTTP {$code}");
+
+// ---- 2. GET avec utilisateur connecté (même classement accessible) ----
+[$code2, $lbBody2] = get_call("{$base}?action=leaderboard", $jarLbA);
+expect('leaderboard GET avec utilisateur connecté => 200', $code2 === 200, "HTTP {$code2}");
+expect('réponse identique en public et connecté', $lbBody === $lbBody2, '');
+
+// ---- 3. Paramètres par défaut et ordre déterministe ----
+$lj = is_array($lbJ) ? ($lbJ['data'] ?? []) : [];
+$filters = $lj['filters'] ?? [];
+$entries = is_array($lj['entries'] ?? null) ? $lj['entries'] : [];
+expect('défauts : mode multiplication, niveau all, type classic',
+    ($filters['mode'] ?? '') === 'multiplication' && ($filters['school_level'] ?? '') === 'all' && ($filters['question_type'] ?? '') === 'classic', '');
+// Le classement 'all' regroupe tous niveaux et donc aussi des comptes créés par
+// d'autres tests HTTP (alice, bob, carol, dave, eve, b2dur...). On vérifie donc
+// UNIQUEMENT les propriétés parmi nos comptes isolés (lb_*) :
+//   - leaderboard: all est non vide ;
+//   - nos joueurs apparaissent chacun UNE SEULE FOIS ;
+//   - le compte désactivé (lb_inactive) est ABSENT ;
+//   - lb_alpha retient sa meilleure partie 10/48000.
+expect('leaderboard : classement général non vide', count($entries) >= 5, 'nb=' . count($entries));
+$nameByOrder = array_column($entries, 'display_name');
+$seenLb = [];
+foreach ($entries as $e) {
+    $n = $e['display_name'] ?? '';
+    if (strncmp($n, 'lb_', 3) === 0) { $seenLb[$n] = ($seenLb[$n] ?? 0) + 1; }
+}
+expect("chaque joueur lb_* n'apparaît qu'une seule fois en général",
+    array_key_exists('lb_alpha', $seenLb) && $seenLb['lb_alpha'] === 1
+    && array_key_exists('lb_beta', $seenLb) && $seenLb['lb_beta'] === 1
+    && array_key_exists('lb_gamma', $seenLb) && $seenLb['lb_gamma'] === 1
+    && array_key_exists('lb_delta', $seenLb) && $seenLb['lb_delta'] === 1,
+    implode(',', array_keys($seenLb)));
+expect("compte désactivé (lb_inactive) absent du classement général", !in_array('lb_inactive', $nameByOrder, true), '');
+// Meilleur résultat par joueur : alpha retient 10/48000 (pas 8/30000 ni 10/65000).
+$alphaRow = null;
+foreach ($entries as $e) { if (($e['display_name'] ?? '') === 'lb_alpha') { $alphaRow = $e; } }
+expect('meilleur résultat retenu (alpha 10/48000)',
+    is_array($alphaRow) && $alphaRow['score'] === 10 && $alphaRow['duration_ms'] === 48000, json_encode($alphaRow));
+// Score prioritaire sur durée : beta (9/10) derrière gamma (10/NULL).
+$orderIdx = array_flip($nameByOrder);
+expect('score prioritaire sur durée (beta derrière gamma 10/NULL)', $orderIdx['lb_gamma'] < $orderIdx['lb_beta'], '');
+// Durée NULL après durée connue à score égal : gamma derrière alpha.
+expect('durée NULL classée après durée connue (gamma derrière alpha)', $orderIdx['lb_alpha'] < $orderIdx['lb_gamma'], '');
+
+
+
+// ---- 4. Filtres valides (niveau scolaire) ----
+[$code, $lbEl] = get_call("{$base}?action=leaderboard&mode=multiplication&school_level=elementary_upper&question_type=classic&limit=20", $jarLbAnon);
+$elJ = json_decode($lbEl, true);
+$elEntries = is_array($elJ['data']['entries'] ?? null) ? $elJ['data']['entries'] : [];
+// elementary_upper : alpha,beta,gamma (delta est high_school, inactive exclu).
+expect('filtre school_level=elementary_upper => 3 entrées',
+    $code === 200 && count($elEntries) === 3, 'HTTP ' . $code . ' nb=' . count($elEntries));
+expect('elementary_upper ordonné (alpha, gamma, beta)',
+    array_column($elEntries, 'display_name') === ['lb_alpha', 'lb_gamma', 'lb_beta'],
+    implode(',', array_column($elEntries, 'display_name')));
+[$code, $lbHs] = get_call("{$base}?action=leaderboard&school_level=high_school", $jarLbAnon);
+$hsJ = json_decode($lbHs, true);
+$hsEntries = is_array($hsJ['data']['entries'] ?? null) ? $hsJ['data']['entries'] : [];
+expect('filtre high_school => seul delta (9/10)', $code === 200 && count($hsEntries) === 1 && ($hsEntries[0]['display_name'] ?? '') === 'lb_delta', 'nb=' . count($hsEntries));
+
+// ---- 5. Filtres invalides => 400 ----
+[$code] = get_call("{$base}?action=leaderboard&mode=soustraction", $jarLbAnon);
+expect('mode inconnu => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=leaderboard&school_level=universite", $jarLbAnon);
+expect('niveau inconnu => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=leaderboard&question_type=quiz", $jarLbAnon);
+expect('type inconnu => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=leaderboard&limit=0", $jarLbAnon);
+expect('limite 0 => 400', $code === 400, "HTTP {$code}");
+[$code] = get_call("{$base}?action=leaderboard&limit=abc", $jarLbAnon);
+expect('limite non numérique => 400', $code === 400, "HTTP {$code}");
+
+// ---- 6. Limite respectée ----
+[$code, $lbLim] = get_call("{$base}?action=leaderboard&limit=2", $jarLbAnon);
+$limJ = json_decode($lbLim, true);
+$limEntries = is_array($limJ['data']['entries'] ?? null) ? $limJ['data']['entries'] : [];
+expect('limit=2 : renvoie 2 entrées', $code === 200 && count($limEntries) === 2, 'HTTP ' . $code . ' nb=' . count($limEntries));
+
+// ---- 7. Confidentialité : aucune donnée privée ----
+$flat = json_encode($lj);
+expect('aucun e-mail exposé', strpos($flat, '@') === false);
+expect('aucun user_id exposé', strpos($flat, '"user_id"') === false && strpos($flat, '"id":') === false);
+expect('aucun rôle/hash exposé', strpos($flat, 'password') === false && stripos($flat, 'admin') === false);
+$first = is_array($entries) && count($entries) > 0 ? $entries[0] : null;
+$firstKeys = is_array($first) ? array_keys($first) : [];
+expect("entrées n'exposent que rank/display_name/score/duration_ms/played_at",
+    count(array_diff($firstKeys, ['rank', 'display_name', 'score', 'duration_ms', 'played_at'])) === 0,
+    implode(',', $firstKeys));
+
+// ---- 8. Séparation classic / hole / mixed ----
+// Les classements par type sont strictement séparés. On restreint ces requêtes
+// à elementary_upper (mode multiplication, défaut) pour isoler nos comptes des
+// parties des autres tests HTTP.
+$lbSave($base, $jarLbA, $tokLbA, 'multiplication', 10, 5000, '2026-01-10T09:00:00Z', 'hole');
+[$code, $lbHole] = get_call("{$base}?action=leaderboard&mode=multiplication&school_level=elementary_upper&question_type=hole", $jarLbAnon);
+$holeJ = json_decode($lbHole, true);
+$holeEntries = is_array($holeJ['data']['entries'] ?? null) ? $holeJ['data']['entries'] : [];
+expect('question_type=hole : séparé de classic (seule la partie hole de alpha)',
+    $code === 200 && count($holeEntries) === 1 && ($holeEntries[0]['display_name'] ?? '') === 'lb_alpha', 'nb=' . count($holeEntries));
+[$code, $lbClassic] = get_call("{$base}?action=leaderboard&mode=multiplication&school_level=elementary_upper&question_type=classic", $jarLbAnon);
+$classicJ = json_decode($lbClassic, true);
+$classicEntries = is_array($classicJ['data']['entries'] ?? null) ? $classicJ['data']['entries'] : [];
+expect('classic inchangé par la partie hole de alpha (3 entrées)',
+    $code === 200 && count($classicEntries) === 3,
+    'HTTP ' . $code . ' nb=' . count($classicEntries));
+expect('classic elementary_upper ordonné (alpha, gamma, beta)',
+    array_column($classicEntries, 'display_name') === ['lb_alpha', 'lb_gamma', 'lb_beta'],
+    implode(',', array_column($classicEntries, 'display_name')));
+
+// ---- 9. Compte désactivé exclu (des deux classements) ----
+$classicNames = array_column((is_array($classicJ['data']['entries'] ?? null) ? $classicJ['data']['entries'] : []), 'display_name');
+expect('compte désactivé (lb_inactive) absent du classement classic', !in_array('lb_inactive', $classicNames, true), '');
+expect('compte désactivé (lb_inactive) absent du classement hole', !in_array('lb_inactive', array_column($holeEntries, 'display_name'), true), '');
+// Et vérifie explicitement que lb_inactive (10/10/1000) n'apparaît nulle part malgré son score.
+[$code, $lbCheck] = get_call("{$base}?action=leaderboard&mode=multiplication&school_level=elementary_upper&question_type=classic", $jarLbAnon);
+$checkJ = json_decode($lbCheck, true);
+$checkNames = array_column((is_array($checkJ['data']['entries'] ?? null) ? $checkJ['data']['entries'] : []), 'display_name');
+expect('classement elementary_upper sans le compte désactivé', !in_array('lb_inactive', $checkNames, true), '');
+
+// ---- 10. Non-régression HTTP ----
+[$code] = get_call("{$base}?action=health", $jarLbAnon);
+expect('non-régression HTTP : health toujours 200', $code === 200, "HTTP {$code}");
 
 
 echo "\n=== Résumé HTTP ===\n";

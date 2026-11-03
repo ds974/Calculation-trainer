@@ -63,6 +63,17 @@ teaching aid whose effectiveness rests on gradual, personalized practice and fee
 - **Guest mode** for immediate play without an account.
 - **Administrative dashboard** for managing accounts and monitoring activity.
 - **Four interface languages** (French, English, Spanish, Simplified Chinese).
+- **Optional school level** (six categories + "unspecified"), self-declared at registration or
+  editable later in the profile. The level is saved with each result and never affects the score
+  rules.
+- **Shared leaderboards** kept on the server (SQLite) and accessible across devices, plus the
+  existing **local scores** kept in the browser for visitors.
+- **Filters** for shared leaderboards: school level, operation (addition / multiplication) and
+  question type (classic / missing-number / mixed), plus a general board across all levels.
+- **Best result per user** in every board, with deterministic tie-breaking by score, then
+  duration, then date.
+- **Participant durations** recorded in milliseconds and used to rank equal scores.
+- Public (open) read access to the shared leaderboards without sign-in.
 - **Responsive interface** adapting to narrow screens, including a touch keypad.
 
 ### About adaptive practice
@@ -218,11 +229,33 @@ osascript -l JavaScript tests/js_adaptive_integration_test.js
 
 ---
 
+## School levels and shared leaderboards
+
+The **v12.8.0** release adds school levels and shared leaderboards to the application:
+
+- **Optional and self-declared.** The school level is chosen by the user (at registration or in
+  the profile) among six categories — *Preschool*, *Lower elementary*, *Upper elementary*,
+  *Middle school*, *High school*, *Higher education and adults* — plus **Unspecified**. It is a
+  personal preference only; it does **not** modify the difficulty rules or scoring.
+- **Historical level.** Each mission is saved on the server with the level that was associated
+  with the account at the time it was played. Old missions without a level are classified under
+  **Unspecified** and are never moved retroactively.
+- **Guests do not publish.** Visitor results remain stored locally in the browser and never
+  appear in the shared leaderboard.
+- **Shared leaderboards.** Only results from registered accounts appear, one best result per user
+  per ranking. Account holders see their own data across devices.
+- **Public names.** The shared leaderboard displays the public login of each account holder. It
+  never exposes e-mails, internal identifiers, roles or other private data.
+
 ## Project status and version
 
-**v12.6.0** is the version prepared for publication on this branch. It adds the four-language
-internationalization, per-account language preference synchronization, and the supporting
-i18n engine, catalogs and tests — on top of the v12.5 adaptive training.
+**v12.8.0** is the version prepared for publication on this branch. It adds optional school
+levels with four-language translations, an API to view and edit the profile level, per-result
+level and duration capture, server-side shared leaderboards (one best result per user, filterable
+by level, operation and question type, plus a general board), a consultation interface kept
+alongside the existing local scores, and a fix to the generated GET API parameters that also
+corrects the adaptive-training difficulty filtering — together with fully compatible SQLite
+migrations for existing data.
 
 ---
 

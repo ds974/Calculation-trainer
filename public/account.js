@@ -46,7 +46,20 @@ const AccountUI = (() => {
       let url = API_BASE;
       const opts = { method, credentials: "same-origin", headers: {} };
       if (method === "GET") {
-        url = API_BASE + "?action=" + encodeURIComponent(action);
+        // v12.8-B4.3 — les requêtes GET (ex. leaderboard, difficulty/operations)
+        // transmettent désormais leurs paramètres de filtre : jusqu'ici le `payload`
+        // était ignoré sur GET, de sorte que toutes les sélections de niveau/mode
+        // du classement partagé étaient envoyées avec les défauts du serveur.
+        const parts = ["action=" + encodeURIComponent(action)];
+        if (payload) {
+          Object.keys(payload).forEach((k) => {
+            const v = payload[k];
+            if (v !== undefined && v !== null) {
+              parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v)));
+            }
+          });
+        }
+        url = API_BASE + "?" + parts.join("&");
       } else {
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(
@@ -314,6 +327,76 @@ const AccountUI = (() => {
     since.innerHTML = "<strong>" + sinceLabel + "</strong> " + formatDate(user.created_at || "");
     wrap.append(login, role, since);
     summary.appendChild(wrap);
+
+    // Ajout du sélecteur de niveau scolaire
+    const schoolLevelSection = document.createElement("div");
+    schoolLevelSection.className = "account-school-level";
+    schoolLevelSection.innerHTML = `
+      <h3 data-i18n="schoolLevel.title">Niveau scolaire</h3>
+      <div class="form-field">
+        <label for="accountSchoolLevelSelect" data-i18n="schoolLevel.optional">Niveau scolaire (facultatif)</label>
+        <div class="select-wrapper">
+          <select id="accountSchoolLevelSelect" name="school_level">
+            <option value="" data-i18n="schoolLevel.unspecified">Non renseigné</option>
+            <option value="preschool" data-i18n="schoolLevel.preschool">Maternelle et avant</option>
+            <option value="elementary_lower" data-i18n="schoolLevel.elementaryLower">Début élémentaire (CP, CE1, CE2)</option>
+            <option value="elementary_upper" data-i18n="schoolLevel.elementaryUpper">Fin élémentaire (CM1, CM2)</option>
+            <option value="middle_school" data-i18n="schoolLevel.middleSchool">Collège</option>
+            <option value="high_school" data-i18n="schoolLevel.highSchool">Lycée</option>
+            <option value="higher_adult" data-i18n="schoolLevel.higherAdult">Supérieur et adultes</option>
+          </select>
+        </div>
+        <p class="help-text" data-i18n="schoolLevel.profileHelp">Votre niveau sert à personnaliser les classements. Vous pourrez le modifier à tout moment.</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" id="saveSchoolLevelButton" data-i18n="schoolLevel.saveButton">Enregistrer le niveau</button>
+        </div>
+        <p id="schoolLevelFeedback" class="form-message" aria-live="polite"></p>
+      </div>
+    `;
+    summary.appendChild(schoolLevelSection);
+
+    // Initialisation du sélecteur avec la valeur actuelle
+    const select = document.getElementById("accountSchoolLevelSelect");
+    if (select && user.school_level !== undefined) {
+      select.value = user.school_level !== null ? user.school_level : "";
+    }
+
+    // Mettre à jour les traductions des options et du bouton immédiatement
+    updateSchoolLevelTranslations();
+
+    // Ajout de l'écouteur d'événement pour le bouton d'enregistrement
+    const saveButton = document.getElementById("saveSchoolLevelButton");
+    if (saveButton) {
+      saveButton.addEventListener("click", handleSchoolLevelSave);
+    }
+  }
+
+  /**
+   * Met à jour les traductions des options de niveau scolaire et du bouton
+   * lors des changements de langue.
+   */
+  function updateSchoolLevelTranslations() {
+    const select = document.getElementById("accountSchoolLevelSelect");
+    const saveButton = document.getElementById("saveSchoolLevelButton");
+
+    if (select) {
+      // Mettre à jour les options
+      const options = select.querySelectorAll("option");
+      options.forEach(option => {
+        if (option.hasAttribute("data-i18n")) {
+          const key = option.getAttribute("data-i18n");
+          option.textContent = i18nT(key, null, option.textContent);
+        }
+      });
+    }
+
+    if (saveButton) {
+      // Mettre à jour le texte du bouton
+      const key = saveButton.getAttribute("data-i18n");
+      if (key) {
+        saveButton.textContent = i18nT(key, null, saveButton.textContent);
+      }
+    }
   }
 
   // --------------------------------------------------------------------- Auth
@@ -551,6 +634,50 @@ const AccountUI = (() => {
     await restoreGuestLocale();
     showToast(i18nT("auth.loggedOut", null, "Vous êtes déconnecté(e)."));
     goHome();
+  }
+
+  /** Gère l'enregistrement du niveau scolaire */
+  async function handleSchoolLevelSave() {
+    const select = document.getElementById("accountSchoolLevelSelect");
+    const feedback = document.getElementById("schoolLevelFeedback");
+    const button = document.getElementById("saveSchoolLevelButton");
+
+    if (!select || !button) return;
+
+    // Récupération de la valeur sélectionnée
+    const schoolLevelValue = select.value;
+    // Convertir la valeur vide en null pour l'API
+    const schoolLevelToSend = schoolLevelValue === "" ? null : schoolLevelValue;
+
+    // Désactivation du bouton pendant le traitement
+    button.disabled = true;
+    button.textContent = i18nT("common.saving", null, "Enregistrement...");
+
+    try {
+      const res = await api("profile/school-level", {
+        school_level: schoolLevelToSend
+      });
+
+      if (res.ok) {
+        // Mise à jour de l'utilisateur local avec la nouvelle valeur
+        user = res.data.user;
+        // Affichage du message de succès
+        showToast(i18nT("schoolLevel.saved", null, "Niveau enregistré."), "success");
+        // Réinitialisation du sélecteur avec la valeur reçue
+        select.value = schoolLevelToSend !== null ? schoolLevelToSend : "";
+      } else {
+        // Affichage du message d'erreur
+        const errorMessage = res.error ? i18nT("schoolLevel.error", null, "Erreur lors de l'enregistrement du niveau.") :
+                                  i18nT("schoolLevel.error", null, "Erreur lors de l'enregistrement du niveau.");
+        showToast(errorMessage, "error");
+      }
+    } catch (err) {
+      showToast(i18nT("schoolLevel.error", null, "Erreur lors de l'enregistrement du niveau."), "error");
+    } finally {
+      // Réactivation du bouton
+      button.disabled = false;
+      button.textContent = i18nT("schoolLevel.saveButton", null, "Enregistrer le niveau");
+    }
   }
 
   // ------------------------------------------------------------------- Profile

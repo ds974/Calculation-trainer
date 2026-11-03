@@ -45,7 +45,9 @@ final class UserRepository
      * Crée un nouvel utilisateur.
      *
      * @param array<string,mixed> $data login, password (clair), role,
-     *        et éventuellement preferred_language (défaut 'fr').
+     *        et éventuellement preferred_language (défaut 'fr'), ainsi qu'un
+     *        niveau scolaire facultatif `school_level` (string parmi les six
+     *        identifiants, ou NULL pour « Non renseigné » — défaut NULL).
      *        L'e-mail n'est plus géré : la colonne `email` reste à NULL.
      * @return int l'identifiant du nouvel utilisateur.
      * @throws RuntimeException si le login est déjà pris.
@@ -65,15 +67,21 @@ final class UserRepository
         // les anciens clients qui ne la transmettent pas.
         $preferredLanguage = (string)($data['preferred_language'] ?? 'fr');
 
+        // Le niveau scolaire est OPTIONNEL et peut rester NULL (« Non renseigné »).
+        // Une valeur fournie a été validée en amont (Validator::schoolLevel) : on ne
+        // stocke que l'un des six identifiants stables, jamais un intitulé traduit.
+        $schoolLevel = $data['school_level'] ?? null;
+
         $stmt = $this->pdo->prepare(
-            'INSERT INTO users (login, email, password_hash, role, preferred_language)
-             VALUES (:login, NULL, :hash, :role, :preferred_language)'
+            'INSERT INTO users (login, email, password_hash, role, preferred_language, school_level)
+             VALUES (:login, NULL, :hash, :role, :preferred_language, :school_level)'
         );
         $stmt->execute([
             'login'              => (string)$data['login'],
             'hash'               => $hash,
             'role'               => (string)($data['role'] ?? 'user'),
             'preferred_language' => $preferredLanguage,
+            'school_level'       => $schoolLevel,
         ]);
 
         return (int)$this->pdo->lastInsertId();
@@ -199,5 +207,22 @@ final class UserRepository
             'UPDATE users SET preferred_language = :language WHERE id = :id'
         );
         $stmt->execute(['language' => $language, 'id' => $userId]);
+    }
+
+    /**
+     * Met à jour le niveau scolaire d'un utilisateur (v12.8-B3.1).
+     *
+     * Ne modifie que le niveau scolaire : le rôle, le statut, le mot de passe,
+     * la langue, les statistiques et les historiques restent strictement
+     * inchangés. `$schoolLevel` est soit l'un des six identifiants stables, soit
+     * NULL pour revenir à « Non renseigné » (jamais la chaîne 'unspecified' ici).
+     * La valeur doit avoir été validée en amont (Validator::schoolLevel).
+     */
+    public function updateSchoolLevel(int $userId, ?string $schoolLevel): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE users SET school_level = :level WHERE id = :id'
+        );
+        $stmt->execute(['level' => $schoolLevel, 'id' => $userId]);
     }
 }

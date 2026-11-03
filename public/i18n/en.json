@@ -108,7 +108,18 @@
     "guestSuffix": "(guest)",
     "yes": "Yes",
     "no": "No",
-    "holeMode": "Mode: {mode}"
+    "holeMode": "Mode: {mode}",
+    "viewSwitch": "Leaderboard type",
+    "shared": "Shared leaderboard",
+    "local": "Local scores",
+    "levelFilter": "Level",
+    "typeFilter": "Question type",
+    "levelAll": "All levels",
+    "sharedLoading": "Loading leaderboard…",
+    "sharedEmpty": "No results for these criteria.",
+    "sharedError": "Unable to load the leaderboard.",
+    "columnRank": "Rank",
+    "columnPlayer": "Player"
   },
   "stats": {
     "kicker": "My performance",
@@ -342,6 +353,23 @@
     "userNotFound": "User not found.",
     "actionUnknown": "Unknown action."
   },
+  "schoolLevel": {
+    "title": "School level",
+    "optional": "School level (optional)",
+    "unspecified": "Not specified",
+    "preschool": "Preschool and earlier",
+    "elementaryLower": "Early elementary",
+    "elementaryUpper": "Upper elementary",
+    "middleSchool": "Middle school",
+    "highSchool": "High school",
+    "higherAdult": "Higher education and adults",
+    "saveButton": "Save level",
+    "saved": "Level saved.",
+    "error": "An error occurred while saving the level.",
+    "profileHelp": "Your level is used to personalize the rankings. You can change it at any time.",
+    "registerHelp": "Optional. Your level is used to personalize the rankings. You can change it at any time."
+  },
+
   "error": {
     "internalServer": "Internal server error.",
     "authRequired": "Authentication required.",
@@ -365,7 +393,8 @@
     "yes": "Yes",
     "no": "No",
     "retry": "Try again",
-    "seconds": "s"
+    "seconds": "s",
+    "saving": "Saving..."
   },
   "aria": {
     "navAccount": "Account navigation",
@@ -385,6 +414,7 @@
     "selectCalcType": "Choose calculation type",
     "debrief": "Question review",
     "top20Table": "Top 20 scores",
+    "sharedTopTable": "Shared leaderboard",
     "searchAccount": "Search for an account",
     "progressionDetail": "Score details for the last 30 games",
     "dailyDetail": "Games played per day (last 30 days, Réunion Island calendar days)",

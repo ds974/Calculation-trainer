@@ -108,7 +108,18 @@
     "guestSuffix": "(invité)",
     "yes": "Oui",
     "no": "Non",
-    "holeMode": "Mode : {mode}"
+    "holeMode": "Mode : {mode}",
+    "viewSwitch": "Type de classement",
+    "shared": "Classement partagé",
+    "local": "Scores locaux",
+    "levelFilter": "Niveau",
+    "typeFilter": "Type de questions",
+    "levelAll": "Tous les niveaux",
+    "sharedLoading": "Chargement du classement…",
+    "sharedEmpty": "Aucun résultat pour ces critères.",
+    "sharedError": "Impossible de charger le classement.",
+    "columnRank": "Rang",
+    "columnPlayer": "Joueur"
   },
   "stats": {
     "kicker": "Mes performances",
@@ -342,6 +353,23 @@
     "userNotFound": "Utilisateur introuvable.",
     "actionUnknown": "Action inconnue."
   },
+  "schoolLevel": {
+    "title": "Niveau scolaire",
+    "optional": "Niveau scolaire (facultatif)",
+    "unspecified": "Non renseigné",
+    "preschool": "Maternelle et avant",
+    "elementaryLower": "Début élémentaire (CP, CE1, CE2)",
+    "elementaryUpper": "Fin élémentaire (CM1, CM2)",
+    "middleSchool": "Collège",
+    "highSchool": "Lycée",
+    "higherAdult": "Supérieur et adultes",
+    "saveButton": "Enregistrer le niveau",
+    "saved": "Niveau enregistré.",
+    "error": "Erreur lors de l’enregistrement du niveau.",
+    "profileHelp": "Votre niveau sert à personnaliser les classements. Vous pourrez le modifier à tout moment.",
+    "registerHelp": "Facultatif. Votre niveau sert à personnaliser les classements. Vous pourrez le modifier à tout moment."
+  },
+
   "error": {
     "internalServer": "Erreur interne du serveur.",
     "authRequired": "Authentification requise.",
@@ -365,7 +393,8 @@
     "yes": "Oui",
     "no": "Non",
     "retry": "Réessayer",
-    "seconds": "s"
+    "seconds": "s",
+    "saving": "Enregistrement..."
   },
   "aria": {
     "navAccount": "Navigation du compte",
@@ -385,6 +414,7 @@
     "selectCalcType": "Choisir le type de calcul",
     "debrief": "Débriefing des questions",
     "top20Table": "Top 20 des scores",
+    "sharedTopTable": "Classement partagé",
     "searchAccount": "Rechercher un compte",
     "progressionDetail": "Détail des scores des 30 dernières parties",
     "dailyDetail": "Parties jouées par jour (30 derniers jours, jours de La Réunion)",

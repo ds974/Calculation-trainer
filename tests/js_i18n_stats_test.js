@@ -17,7 +17,7 @@
 // stubs DOM minimaux pour exercer les aides pures de l'interface.
 //
 // Couverture (§8 de la mission) :
-//   1. présence des clés utilisées dans les quatre catalogues (365 chacune) ;
+//   1. présence des clés utilisées dans les quatre catalogues (392 chacune) ;
 //   2. traduction des indicateurs (tableau de bord) ;
 //   3. traduction des titres et légendes des graphiques ;
 //   4. traduction des messages d'absence de données ;
@@ -81,10 +81,10 @@ FILES.forEach(function (locale) {
   }
 });
 check("les 4 catalogues sont chargés", FILES.every(function (l) { return catalogs[l]; }), "");
-// Chacun des catalogues contient exactement 365 clés (B3.2).
+// Chacun des catalogues contient exactement 392 clés (v12.8-B4.2).
 FILES.forEach(function (locale) {
   var n = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).length : -1;
-  check("catalogue (" + locale + ") : 365 clés", n === 365, "n=" + n);
+  check("catalogue (" + locale + ") : 392 clés", n === 392, "n=" + n);
 });
 
 // ==================================================================== MOTEUR

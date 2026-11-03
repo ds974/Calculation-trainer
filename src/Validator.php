@@ -112,6 +112,69 @@ final class Validator
         return is_int($score) && $score >= 0 && $score <= 10;
     }
 
+    /** Borne supérieure raisonnable d'une durée de partie, en millisecondes (30 min). */
+    public const MAX_DURATION_MS = 1_800_000;
+
+    /**
+     * Valide une durée de partie en millisecondes (v12.8-B2).
+     *
+     * Une durée valide est un ENTIER STRICTEMENT POSITIF ne dépassant pas
+     * MAX_DURATION_MS. Les valeurs NULL, décimales, chaînes arbitraires,
+     * booléens, négatives, nulles ou démesurées sont rejetées. NULL représente
+     * une durée inconnue (anciennes parties) et se décide au niveau de l'appelant.
+     *
+     * @return true si durée valide.
+     */
+    public static function durationMs(mixed $value): bool
+    {
+        return is_int($value) && $value > 0 && $value <= self::MAX_DURATION_MS;
+    }
+
+    /** Les six catégories de niveau scolaire déclarables (v12.8-B3.1). */
+    public const SCHOOL_LEVELS = [
+        'preschool',
+        'elementary_lower',
+        'elementary_upper',
+        'middle_school',
+        'high_school',
+        'higher_adult',
+    ];
+
+    /**
+     * Valide une valeur de niveau scolaire (v12.8-B3.1).
+     *
+     * Une valeur est acceptée si :
+     *  - elle vaut `null` (profil « Non renseigné » — l'absence de niveau s'exprime
+     *    par NULL dans `users.school_level`, jamais par la chaîne 'unspecified') ; ou
+     *  - c'est l'un des six identifiants stables (indépendants des traductions).
+     *
+     * Les intitulés traduits (CP, CE1...), les valeurs arbitraires, les booléens,
+     * numériques, tableaux ou chaînes vides sont rejetés.
+     *
+     * @param mixed $value valeur brute transmise (réelle, jamais pré-castée en chaîne).
+     * @return true si la valeur est un niveau valide (ou null pour « non renseigné »).
+     */
+    public static function schoolLevel(mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+        if (!is_string($value)) {
+            return false;
+        }
+        return in_array($value, self::SCHOOL_LEVELS, true);
+    }
+
+    /**
+     * Renvoie la liste des six catégories de niveau scolaire déclarables.
+     *
+     * @return string[]
+     */
+    public static function allowedSchoolLevels(): array
+    {
+        return self::SCHOOL_LEVELS;
+    }
+
     /**
      * Codes linguistiques canorisés acceptés par l'application (v12.6-C1).
      *

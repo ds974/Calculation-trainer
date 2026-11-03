@@ -179,7 +179,7 @@ function makeElStub() {
     style: {}, dataset: {},
     classList: { add: function() {}, remove: function() {}, toggle: function() {} },
     addEventListener: function() {}, focus: function() {},
-    closest: function() { return null; },
+    closest: function() { return { hidden: false }; },
     setAttribute: function() {}, appendChild: function() {}, hidden: false
   };
 }
@@ -213,8 +213,11 @@ appSrc = appSrc +
   " answer: questionAnswer, compute: computeAnswer, modeLabel: modeLabel," +
   " questionTypeLabel: questionTypeLabel, encouragement: encouragementFor," +
   " validate: validateQuestionPool, MODES: MODES, QUESTION_COUNT: QUESTION_COUNT," +
-  " state: state, updateHomeTitle: updateHomeTitle };";
-
+  " state: state, updateHomeTitle: updateHomeTitle," +
+  " lbState: leaderboardState, lbApiMode: leaderboardApiMode, lbApiParams: leaderboardApiParams," +
+  " lbDefaultLevel: defaultLeaderboardLevel, lbUserLevel: currentUserSchoolLevel," +
+  " lbFormatDuration: formatSharedDuration, lbResetDefaults: resetLeaderboardDefaultFilters," +
+  " switchLeaderboardView: switchLeaderboardView }";
 var appLoadError = null;
 try { globalThis.eval(appSrc); } catch (e) { appLoadError = "ERREUR : " + e; }
 check("syntaxe JS valide (chargement app.js)", appLoadError === null, appLoadError || "");
@@ -372,6 +375,61 @@ if (fu && fu.correction && I18N) {
   check("correction ne modifie pas le résultat attendu (révèle seulement 30)",
     fu.correction({ a: 5, b: 6, mode: "mult" }).indexOf("30") !== -1, "");
   check("le moteur i18n reste opérationnel", typeof I18N.t === "function", "");
+
+  // --- 13. B4.2 — Interface des classements partagés. ---
+  // Filtre par défaut selon le compte courant (invité / sans niveau / déclaré).
+  window.MissionGuestHistory = null;
+  check("invité -> niveau par défaut 'unspecified'", fu.lbDefaultLevel() === "unspecified", fu.lbDefaultLevel());
+  window.MissionGuestHistory = { hasSession: true, currentUser: { login: "alice", role: "user", school_level: null } };
+  check("compte sans niveau -> 'unspecified'", fu.lbDefaultLevel() === "unspecified", fu.lbDefaultLevel());
+  window.MissionGuestHistory = { hasSession: true, currentUser: { login: "bob", role: "user", school_level: "elementary_upper" } };
+  check("compte avec niveau -> niveau déclaré", fu.lbDefaultLevel() === "elementary_upper", fu.lbDefaultLevel());
+  // Bascule partagée par défaut + conservation du niveau du compte au reset.
+  fu.lbState.schoolLevel = "all"; fu.lbState.view = "local";
+  fu.lbResetDefaults();
+  check("ouverture : vue partagée par défaut", fu.lbState.view === "shared", fu.lbState.view);
+  check("reset : niveau du compte conservé", fu.lbState.schoolLevel === "elementary_upper", fu.lbState.schoolLevel);
+  check("reset : type de questions classique par défaut", fu.lbState.questionType === "classic", fu.lbState.questionType);
+  // Conversion mode interne -> API et paramètres d'appel.
+  check("mode mult -> API 'multiplication'", fu.lbApiMode("mult") === "multiplication", fu.lbApiMode("mult"));
+  check("mode add -> API 'addition'", fu.lbApiMode("add") === "addition", fu.lbApiMode("add"));
+  fu.lbState.mode = "add"; fu.lbState.schoolLevel = "all"; fu.lbState.questionType = "mixed";
+  var lbp = fu.lbApiParams();
+  check("params API : mode addition", lbp.mode === "addition", String(lbp.mode));
+  check("params API : school_level all", lbp.school_level === "all", String(lbp.school_level));
+  check("params API : question_type mixed", lbp.question_type === "mixed", String(lbp.question_type));
+  check("params API : limit 20", lbp.limit === 20, String(lbp.limit));
+  fu.lbState.mode = "mult"; fu.lbState.schoolLevel = "unspecified"; fu.lbState.questionType = "classic";
+  // Format de durée (conversion ms -> secondes, et durée inconnue).
+  check("durée 38000 ms -> 38.0 s", fu.lbFormatDuration(38000) === "38.0 s", fu.lbFormatDuration(38000));
+  check("durée 45000 ms -> 45.0 s", fu.lbFormatDuration(45000) === "45.0 s", fu.lbFormatDuration(45000));
+  check("durée null -> tiret", fu.lbFormatDuration(null) === "—", fu.lbFormatDuration(null));
+  // Consultation des scores locaux sans appel serveur (B4.2, vue locale).
+  var apiCalls = 0;
+  window.AccountUI = { api: function () { apiCalls++; return Promise.resolve({ ok: false, data: null }); } };
+  fu.switchLeaderboardView("local");
+  check("scores locaux : aucun appel serveur", apiCalls === 0 && fu.lbState.view === "local", "calls=" + apiCalls);
+  fu.switchLeaderboardView("shared");
+  check("bascule partagé : vue partagée + appel serveur", apiCalls === 1 && fu.lbState.view === "shared", "calls=" + apiCalls);
+  // Affichage sécurisé : display_name inséré via textContent, jamais innerHTML.
+  check("XSS : display_name rendu via textContent",
+    /name\.textContent\s*=\s*String\(\(entry\s*&&\s*entry\.display_name\)/.test(appSrc), "");
+  // Anti-réponses obsolètes : le chargement compare l'identifiant de requête.
+  check("anti-réponses obsolètes : garde requestId présente",
+    /requestId\s*!==\s*leaderboardState\.requestId/.test(appSrc) &&
+    /\+\+leaderboardState\.requestId/.test(appSrc), "");
+  // Actualisation à chaque nouvelle ouverture (showLeaderboard réinitialise).
+  check("réinitialisation à chaque ouverture présent dans showLeaderboard",
+    /function showLeaderboard\(\)[\s\S]{0,400}resetLeaderboardDefaultFilters\(\)/.test(appSrc), "");
+  // Clés B4.2 présentes et cohérentes dans les quatre catalogues.
+  ["shared", "local", "viewSwitch", "levelFilter", "typeFilter", "levelAll",
+   "sharedLoading", "sharedEmpty", "sharedError", "columnRank", "columnPlayer"].forEach(function (k) {
+    var pres = true;
+    FILES.forEach(function (l) {
+      if (typeof flatCatalogs[l]["leaderboard." + k] !== "string") pres = false;
+    });
+    check("clé B4.2 leaderboard." + k + " présente dans les 4 langues", pres, "");
+  });
 }
 function varsOf(str) {
   var re = /\{([^{}]+)\}/g, mm, list = [];

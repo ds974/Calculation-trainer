@@ -10,7 +10,7 @@
 // son API interne _register(). On utilise ensuite le noyau SYNCHRONE du moteur
 // (t/pl/formatNumber/formatDate/_setLocaleSync/_normalizeLocale) pour vérifier :
 //   1. la validité et le chargement des quatre catalogues ;
-//   2. la complétude des clés (365 clés, structures identiques) ;
+//   2. la complétude des clés (392 clés, structures identiques) ;
 //   3. le respect des variables d'interpolation (mêmes variables par clé) ;
 //   4. la traduction simple ;
 //   5. l'interpolation des variables ;
@@ -105,10 +105,10 @@ FILES.forEach(function (locale) {
   if (loadOk && I18N && typeof I18N === "object") {
     // Même ensemble de clés partout (complétude croisée).
     var refKeys = Object.keys(flatCatalogs["fr"]).sort();
-    check("nombre de clés français = 365", refKeys.length === 365, "trouvées : " + refKeys.length);
+    check("nombre de clés français = 392", refKeys.length === 392, "trouvées : " + refKeys.length);
     FILES.forEach(function (locale) {
       var keys = Object.keys(flatCatalogs[locale]).sort();
-      check("nombre de clés (" + locale + ") = 365", keys.length === 365, "trouvées : " + keys.length);
+      check("nombre de clés (" + locale + ") = 392", keys.length === 392, "trouvées : " + keys.length);
     });
     var refSet = {};
     refKeys.forEach(function (k) { refSet[k] = true; });
@@ -119,8 +119,8 @@ FILES.forEach(function (locale) {
         (missing.length ? "manquantes: " + missing.join(",") : "") +
         (extra.length ? " | extra: " + extra.join(",") : ""));
     });
-    // 18 domaines de premier niveau.
-    check("18 domaines de premier niveau", Object.keys(catalogs["fr"]).length === 18,
+    // 19 domaines de premier niveau.
+    check("19 domaines de premier niveau", Object.keys(catalogs["fr"]).length === 19,
       "trouvés : " + Object.keys(catalogs["fr"]).length);
 
     // ---------------------------------------------------------------- 3.

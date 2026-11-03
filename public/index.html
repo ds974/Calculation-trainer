@@ -141,6 +141,15 @@
         </div>
         <p class="muted" data-i18n="leaderboard.intro">Les 20 meilleurs résultats, classés par score puis par temps.</p>
 
+        <div class="leaderboard-view-switch" role="tablist" data-i18n-aria-label="leaderboard.viewSwitch">
+          <button type="button" class="leaderboard-view-btn is-active" data-leaderboard-view="shared" role="tab" aria-selected="true" data-i18n="leaderboard.shared">
+            Classement partagé
+          </button>
+          <button type="button" class="leaderboard-view-btn" data-leaderboard-view="local" role="tab" aria-selected="false" data-i18n="leaderboard.local">
+            Scores locaux
+          </button>
+        </div>
+
         <div class="leaderboard-tabs" role="tablist" data-i18n-aria-label="leaderboard.tablist">
           <button type="button" class="leaderboard-tab" data-leaderboard-mode="mult" role="tab" aria-selected="true" data-i18n="common.multiplications">
             Multiplications
@@ -149,22 +158,75 @@
             Additions
           </button>
         </div>
+
+        <div id="sharedLeaderboardFilters" class="leaderboard-filters">
+          <div class="filter-field">
+            <label for="sharedLeaderboardLevel" data-i18n="leaderboard.levelFilter">Niveau</label>
+            <div class="select-wrapper">
+              <select id="sharedLeaderboardLevel">
+                <option value="all" data-i18n="leaderboard.levelAll">Tous les niveaux</option>
+                <option value="preschool" data-i18n="schoolLevel.preschool">Maternelle et avant</option>
+                <option value="elementary_lower" data-i18n="schoolLevel.elementaryLower">Début élémentaire (CP, CE1, CE2)</option>
+                <option value="elementary_upper" data-i18n="schoolLevel.elementaryUpper">Fin élémentaire (CM1, CM2)</option>
+                <option value="middle_school" data-i18n="schoolLevel.middleSchool">Collège</option>
+                <option value="high_school" data-i18n="schoolLevel.highSchool">Lycée</option>
+                <option value="higher_adult" data-i18n="schoolLevel.higherAdult">Supérieur et adultes</option>
+                <option value="unspecified" data-i18n="schoolLevel.unspecified">Non renseigné</option>
+              </select>
+            </div>
+          </div>
+          <div class="filter-field">
+            <label for="sharedLeaderboardType" data-i18n="leaderboard.typeFilter">Type de questions</label>
+            <div class="select-wrapper">
+              <select id="sharedLeaderboardType">
+                <option value="classic" data-i18n="config.questionTypeClassic">Classique</option>
+                <option value="hole" data-i18n="config.questionTypeHole">À trou</option>
+                <option value="mixed" data-i18n="config.questionTypeMixed">Mélange</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <h3 id="leaderboardHeadline" class="leaderboard-headline">Top 20 — Multiplications</h3>
 
-        <div id="leaderboardEmpty" class="empty-state" hidden data-i18n="leaderboard.empty">Aucun score enregistré pour le moment.</div>
-        <div class="table-scroll">
-          <table class="leaderboard-table" data-i18n-aria-label="aria.top20Table">
-            <thead>
-              <tr>
-                <th data-i18n="leaderboard.columnName">Prénom</th>
-                <th data-i18n="leaderboard.columnScore">Score</th>
-                <th data-i18n="leaderboard.columnTime">Temps</th>
-                <th data-i18n="leaderboard.columnHole" data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)" data-i18n-tooltip="tooltip.holeHeader">À trou</th>
-                <th id="leaderboardDetailHeader">Tables utilisées</th>
-              </tr>
-            </thead>
-            <tbody id="leaderboardBody"></tbody>
-          </table>
+        <div id="sharedLeaderboardContainer">
+          <div id="sharedLeaderboardLoading" class="empty-state" hidden data-i18n="leaderboard.sharedLoading">Chargement du classement…</div>
+          <div id="sharedLeaderboardError" class="empty-state" hidden>
+            <span data-i18n="leaderboard.sharedError">Impossible de charger le classement.</span>
+            <button type="button" class="btn btn-primary" data-action="retry-leaderboard" data-i18n="common.retry">Réessayer</button>
+          </div>
+          <div id="sharedLeaderboardEmpty" class="empty-state" hidden data-i18n="leaderboard.sharedEmpty">Aucun résultat pour ces critères.</div>
+          <div class="table-scroll">
+            <table class="leaderboard-table" data-i18n-aria-label="aria.sharedTopTable" id="sharedLeaderboardTable" hidden>
+              <thead>
+                <tr>
+                  <th data-i18n="leaderboard.columnRank">Rang</th>
+                  <th data-i18n="leaderboard.columnPlayer">Joueur</th>
+                  <th data-i18n="leaderboard.columnScore">Score</th>
+                  <th data-i18n="leaderboard.columnTime">Temps</th>
+                </tr>
+              </thead>
+              <tbody id="sharedLeaderboardBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="localLeaderboardContainer" hidden>
+          <div id="leaderboardEmpty" class="empty-state" hidden data-i18n="leaderboard.empty">Aucun score enregistré pour le moment.</div>
+          <div class="table-scroll">
+            <table class="leaderboard-table" data-i18n-aria-label="aria.top20Table">
+              <thead>
+                <tr>
+                  <th data-i18n="leaderboard.columnName">Prénom</th>
+                  <th data-i18n="leaderboard.columnScore">Score</th>
+                  <th data-i18n="leaderboard.columnTime">Temps</th>
+                  <th data-i18n="leaderboard.columnHole" data-tooltip="Mission à trou ou mélange (survolez pour le mode exact)" data-i18n-tooltip="tooltip.holeHeader">À trou</th>
+                  <th id="leaderboardDetailHeader">Tables utilisées</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboardBody"></tbody>
+            </table>
+          </div>
         </div>
         <button class="btn btn-primary" data-action="home" data-i18n="common.backToHome">Retour à l’accueil</button>
       </div>
@@ -410,6 +472,22 @@
             <label for="registerPasswordConfirm" data-i18n="auth.registerPasswordConfirmLabel">Confirmation du mot de passe</label>
             <input type="password" id="registerPasswordConfirm" name="password_confirm"
                    autocomplete="new-password" minlength="10" required placeholder="Répétez le mot de passe" data-i18n-placeholder="auth.registerPasswordConfirmPlaceholder">
+          </div>
+          <!-- NIVEAU SCOLAIRE (facultatif) -->
+          <div class="form-field">
+            <label for="registerSchoolLevel" data-i18n="schoolLevel.optional">Niveau scolaire (facultatif)</label>
+            <div class="select-wrapper">
+              <select id="registerSchoolLevel" name="school_level" data-i18n="schoolLevel.optional">
+                <option value="" data-i18n="schoolLevel.unspecified">Non renseigné</option>
+                <option value="preschool" data-i18n="schoolLevel.preschool">Maternelle et avant</option>
+                <option value="elementary_lower" data-i18n="schoolLevel.elementaryLower">Début élémentaire (CP, CE1, CE2)</option>
+                <option value="elementary_upper" data-i18n="schoolLevel.elementaryUpper">Fin élémentaire (CM1, CM2)</option>
+                <option value="middle_school" data-i18n="schoolLevel.middleSchool">Collège</option>
+                <option value="high_school" data-i18n="schoolLevel.highSchool">Lycée</option>
+                <option value="higher_adult" data-i18n="schoolLevel.higherAdult">Supérieur et adultes</option>
+              </select>
+            </div>
+            <p class="help-text" data-i18n="schoolLevel.registerHelp">Facultatif. Votre niveau sert à personnaliser les classements. Vous pourrez le modifier à tout moment.</p>
           </div>
           <p id="registerFeedback" class="form-message" aria-live="polite"></p>
           <div class="form-actions">

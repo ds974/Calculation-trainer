@@ -156,6 +156,14 @@ const GuestHistoryV12 = (() => {
         played_at: playedAt,
         question_type: questionType,
       };
+      // v12.8-B2 : durée de la partie en millisecondes (comptes connectés UNIQUEMENT).
+      // Le flux « invité » ne quitte jamais le navigateur (partie locale) ; seuls les
+      // enregistrements de comptes authentifiés transmettent la durée au serveur. Une
+      // durée absente ou invalide reste acceptée (NULL) pour préserver la
+      // rétrocompatibilité avec d'éventuels clients plus anciens.
+      if (Number.isInteger(part.durationMs) && part.durationMs > 0) {
+        payload.duration_ms = part.durationMs;
+      }
       // v12.4 : détail individuel des réponses + mission_id stable => mémoire
       // des difficultés personnelles côté serveur (atomique et idempotente).
       if (part.missionId && Array.isArray(part.details) && part.details.length) {

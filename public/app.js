@@ -82,6 +82,57 @@ const state = {
   missionId: null
 };
 
+// --- v12.8-B4.2 — État de l'écran des classements (partagé + local). ---
+// `view` : "shared" (classement partagé serveur, affichage principal)
+//          ou "local" (tableau des scores du navigateur, inchangé).
+// `mode` : mode interne JS ("mult" | "add") du classement courant.
+// `schoolLevel` / `questionType` : filtres du classement partagé, conservés
+//          lors d'un changement de langue ou de mode.
+// `requestId` : compteur anti-réponses obsolètes (une vieille réponse réseau ne
+//          remplace jamais la requête la plus récente).
+const leaderboardState = {
+  view: "shared",
+  mode: state.config.mode === "add" ? "add" : "mult",
+  schoolLevel: "unspecified",
+  questionType: "classic",
+  requestId: 0,
+};
+
+/** Convertit le mode interne JS vers l'identifiant API du classement partagé. */
+function leaderboardApiMode(mode) {
+  return mode === "add" ? "addition" : "multiplication";
+}
+
+/** Paramètres d'appel du endpoint `leaderboard` (GET public, sans CSRF). */
+function leaderboardApiParams() {
+  return {
+    mode: leaderboardApiMode(leaderboardState.mode),
+    school_level: leaderboardState.schoolLevel,
+    question_type: leaderboardState.questionType,
+    limit: 20,
+  };
+}
+
+/** Niveau scolaire déclaré du compte courant (ou null en mode invité). */
+function currentUserSchoolLevel() {
+  const gh = (typeof window !== "undefined" && typeof window.MissionGuestHistory !== "undefined")
+    ? window.MissionGuestHistory
+    : null;
+  const u = (gh && gh.currentUser) ? gh.currentUser : null;
+  return u && u.school_level ? String(u.school_level) : null;
+}
+
+/**
+ * Niveau filtrant par défaut du classement partagé :
+ * - compte connecté avec niveau déclaré -> son niveau scolaire (historique) ;
+ * - compte connecté sans niveau déclarée, ou invité -> "unspecified".
+ * `all` n'est jamais choisi automatiquement.
+ */
+function defaultLeaderboardLevel() {
+  const level = currentUserSchoolLevel();
+  return level || "unspecified";
+}
+
 document.addEventListener("DOMContentLoaded", init);
 
 function init() {
@@ -124,10 +175,17 @@ function refreshI18n() {
     warning.textContent = validateQuestionPool() || "";
   }
 
-  // Classement du menu.
+  // Classement du menu (B4.2) : retraduit les libellés dynamiques et ré-affiche
+  // le tableau courant, sans réinitialiser les filtres sélectionnés.
   const leaderboardScreen = document.getElementById("leaderboardScreen");
   if (leaderboardScreen && leaderboardScreen.classList.contains("active")) {
-    switchLeaderboardMode(state.config.mode);
+    renderLeaderboardHeadline();
+    // Selon la vue active, on rafraîchit l'état sans perdre les sélections.
+    if (leaderboardState.view === "shared") {
+      renderSharedLeaderboardState();
+    } else {
+      switchLeaderboardMode(leaderboardState.mode);
+    }
   }
 
   // Rapport de mission (sans toucher à la progression ni aux réponses saisies).
@@ -146,6 +204,13 @@ function bindActions() {
       return;
     }
 
+    // Bascule Classement partagé / Scores locaux.
+    const viewBtn = event.target.closest("[data-leaderboard-view]");
+    if (viewBtn) {
+      switchLeaderboardView(viewBtn.dataset.leaderboardView);
+      return;
+    }
+
     const button = event.target.closest("[data-action]");
     if (!button) return;
 
@@ -153,10 +218,31 @@ function bindActions() {
     if (action === "start") startMission();
     if (action === "config") showConfig();
     if (action === "leaderboard") showLeaderboard();
-    if (action === "home") showScreen("homeScreen");
+    if (action === "retry-leaderboard") retrySharedLeaderboard();
+    if (action === "home") {
+      // En quittant l'écran, la prochaine ouverture recalcule le filtre par
+      // défaut selon le compte courant (B4.2). Aucun appel réseau n'est lancé.
+      showScreen("homeScreen");
+    }
     if (action === "restart") saveThen(() => startMission());
     if (action === "save-home") saveThen(() => showScreen("homeScreen"));
   });
+
+  // --- Filtres du classement partagé (B4.2). ---
+  const levelSelect = document.getElementById("sharedLeaderboardLevel");
+  if (levelSelect) {
+    levelSelect.addEventListener("change", () => {
+      leaderboardState.schoolLevel = levelSelect.value;
+      loadSharedLeaderboard();
+    });
+  }
+  const typeSelect = document.getElementById("sharedLeaderboardType");
+  if (typeSelect) {
+    typeSelect.addEventListener("change", () => {
+      leaderboardState.questionType = typeSelect.value;
+      loadSharedLeaderboard();
+    });
+  }
 }
 
 // --- Opérations centralisées ---
@@ -342,8 +428,14 @@ function showConfig() {
 }
 
 function showLeaderboard() {
-  switchLeaderboardMode(state.config.mode);
+  // B4.2 — À chaque ouverture (nouvelle visite), on applique le filtre par
+  // défaut du compte courant, puis on affiche le classement partagé en premier.
+  resetLeaderboardDefaultFilters();
+  syncLeaderboardFilterControls();
+  switchLeaderboardMode(leaderboardState.mode);
+  renderLeaderboardHeadline();
   showScreen("leaderboardScreen");
+  renderLeaderboardView();
 }
 
 function buildConfigControls() {
@@ -1126,6 +1218,7 @@ async function saveConnectedResult() {
         score: state.score,
         playedAt: new Date().toISOString(),
         missionId: state.missionId || undefined,
+        durationMs: Math.round(state.finalScore.time * 1000),
         details,
       });
     }
@@ -1545,19 +1638,186 @@ function activateLeaderboardTab(mode) {
 }
 
 function switchLeaderboardMode(mode) {
+  leaderboardState.mode = mode;
   activateLeaderboardTab(mode);
-  const headline = document.getElementById("leaderboardHeadline");
-  if (headline) {
-    headline.textContent = i18nT("leaderboard.headline", { mode: modeLabel(mode) }, `Top 20 — ${modeLabel(mode)}`);
+  syncLeaderboardFilterControls();
+  renderLeaderboardHeadline();
+  if (leaderboardState.view === "shared") {
+    loadSharedLeaderboard();
+  } else {
+    renderLeaderboard("leaderboardBody", "leaderboardEmpty", mode);
   }
-  const detailHeader = document.getElementById("leaderboardDetailHeader");
-  if (detailHeader) {
-    detailHeader.textContent = i18nT(
-      mode === "add" ? "leaderboard.columnDetailAdd" : "leaderboard.columnDetailMult",
-      null,
-      mode === "add" ? "Plage utilisée" : "Tables utilisées"
-    );
-  }
-  renderLeaderboard("leaderboardBody", "leaderboardEmpty", mode);
 }
 
+// --- B4.2 — Interface des classements partagés ---
+
+/** Active le bouton de la vue demandée (partagé ou local). */
+function activateLeaderboardViewBtn(view) {
+  document.querySelectorAll("[data-leaderboard-view]").forEach((btn) => {
+    const active = btn.dataset.leaderboardView === view;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+/** Masque/affiche le bloc de la vue partagée vs locale. */
+function renderLeaderboardView() {
+  const shared = document.getElementById("sharedLeaderboardContainer");
+  const local = document.getElementById("localLeaderboardContainer");
+  const filters = document.getElementById("sharedLeaderboardFilters");
+  activateLeaderboardViewBtn(leaderboardState.view);
+  if (shared) shared.hidden = leaderboardState.view !== "shared";
+  if (local) local.hidden = leaderboardState.view !== "local";
+  if (filters) filters.hidden = leaderboardState.view !== "shared";
+}
+
+/** Bascule entre Classement partagé et Scores locaux. */
+function switchLeaderboardView(view) {
+  if (view !== "shared" && view !== "local") return;
+  leaderboardState.view = view;
+  renderLeaderboardView();
+  renderLeaderboardHeadline();
+  if (view === "shared") {
+    loadSharedLeaderboard();
+  } else {
+    // Aucun appel serveur : on restitue simplement le classement local (B4.2).
+    renderLeaderboard("leaderboardBody", "leaderboardEmpty", leaderboardState.mode);
+    const detailHeader = document.getElementById("leaderboardDetailHeader");
+    if (detailHeader) {
+      detailHeader.textContent = i18nT(
+        leaderboardState.mode === "add" ? "leaderboard.columnDetailAdd" : "leaderboard.columnDetailMult",
+        null,
+        leaderboardState.mode === "add" ? "Plage utilisée" : "Tables utilisées"
+      );
+    }
+  }
+}
+
+/** Titre du classement (mode courant), commun aux deux vues. */
+function renderLeaderboardHeadline() {
+  const headline = document.getElementById("leaderboardHeadline");
+  if (!headline) return;
+  const label = modeLabel(leaderboardState.mode);
+  headline.textContent = i18nT("leaderboard.headline", { mode: label }, `Top 20 — ${label}`);
+}
+
+/** Réinitialise les filtres du classement partagé au niveau par défaut du
+ *  compte courant (B4.2). Appelé à chaque ouverture de l'écran. */
+function resetLeaderboardDefaultFilters() {
+  leaderboardState.schoolLevel = defaultLeaderboardLevel();
+  leaderboardState.questionType = "classic";
+  leaderboardState.view = "shared";
+}
+
+/** Synchronise les valeurs DOM des deux sélecteurs avec l'état interne. */
+function syncLeaderboardFilterControls() {
+  const levelSelect = document.getElementById("sharedLeaderboardLevel");
+  if (levelSelect && leaderboardState.schoolLevel !== undefined) {
+    if (levelSelect.querySelector(`option[value="${leaderboardState.schoolLevel}"]`)) {
+      levelSelect.value = leaderboardState.schoolLevel;
+    } else {
+      levelSelect.value = "unspecified";
+    }
+  }
+  const typeSelect = document.getElementById("sharedLeaderboardType");
+  if (typeSelect && leaderboardState.questionType !== undefined) {
+    typeSelect.value = leaderboardState.questionType;
+  }
+}
+
+/** « Réessayer » après une erreur réseau du classement partagé. */
+function retrySharedLeaderboard() {
+  loadSharedLeaderboard();
+}
+
+/** Ré-affiche l'état courant du partagé après un changement de langue, sans
+ *  relancer un appel réseau si des données sont déjà affichées. */
+function renderSharedLeaderboardState() {
+  const tbody = document.getElementById("sharedLeaderboardBody");
+  if (!tbody || !tbody.childElementCount) {
+    // Aucune donnée déjà chargée : on relance le chargement.
+    loadSharedLeaderboard();
+  }
+  // Si des rangées existent, les libellés statiques ont déjà été retraduits par
+  // le moteur i18n ; on ne modifie ni les sélections ni les données.
+}
+
+/** Affiche uniquement le message d'état demandé dans le bloc partagé. */
+function showSharedLeaderboardState(stateKey) {
+  const loading = document.getElementById("sharedLeaderboardLoading");
+  const error = document.getElementById("sharedLeaderboardError");
+  const empty = document.getElementById("sharedLeaderboardEmpty");
+  const table = document.getElementById("sharedLeaderboardTable");
+  if (loading) loading.hidden = stateKey !== "loading";
+  if (error) error.hidden = stateKey !== "error";
+  if (empty) empty.hidden = stateKey !== "empty";
+  if (table) table.hidden = stateKey !== "table";
+}
+
+/** Formate la durée (ms) en secondes lisibles ; null -> « — ». */
+function formatSharedDuration(durationMs) {
+  if (durationMs === null || durationMs === undefined) return "—";
+  const seconds = Number(durationMs) / 1000;
+  if (!Number.isFinite(seconds)) return "—";
+  return `${seconds.toFixed(1)} s`;
+}
+
+/**
+ * Interroge le classement partagé (GET public, sans jeton CSRF) et affiche le
+ * résultat. La réponse n'est prise en compte que si elle correspond à la
+ * requête la plus récente (anti-réponses obsolètes).
+ */
+async function loadSharedLeaderboard() {
+  if (typeof window.AccountUI === "undefined" || typeof window.AccountUI.api !== "function") {
+    return;
+  }
+  const requestId = ++leaderboardState.requestId;
+  showSharedLeaderboardState("loading");
+
+  try {
+    const res = await window.AccountUI.api("leaderboard", leaderboardApiParams(), "GET");
+    if (requestId !== leaderboardState.requestId) return; // réponse obsolète
+    if (!res.ok || !res.data) {
+      showSharedLeaderboardState("error");
+      return;
+    }
+    renderSharedLeaderboard(res.data);
+  } catch (_e) {
+    if (requestId !== leaderboardState.requestId) return;
+    showSharedLeaderboardState("error");
+  }
+}
+
+/** Construit les rangées du tableau partagé (aucune insertion via innerHTML). */
+function renderSharedLeaderboard(data) {
+  const entries = Array.isArray(data && data.entries) ? data.entries : [];
+  const tbody = document.getElementById("sharedLeaderboardBody");
+  if (tbody) tbody.innerHTML = "";
+
+  if (entries.length === 0) {
+    showSharedLeaderboardState("empty");
+    return;
+  }
+
+  showSharedLeaderboardState("table");
+
+  entries.forEach((entry) => {
+    const row = document.createElement("tr");
+
+    const rank = document.createElement("td");
+    rank.textContent = String(entry && entry.rank !== undefined ? entry.rank : "—");
+
+    const name = document.createElement("td");
+    // display_name vient du serveur : texte brut, jamais de HTML non échappé.
+    name.textContent = String((entry && entry.display_name) || "");
+
+    const score = document.createElement("td");
+    score.textContent = `${Number(entry && entry.score)}/10`;
+
+    const time = document.createElement("td");
+    time.textContent = formatSharedDuration(entry && entry.duration_ms);
+
+    row.append(rank, name, score, time);
+    tbody.appendChild(row);
+  });
+}

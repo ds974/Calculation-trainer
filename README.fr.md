@@ -67,6 +67,18 @@ avec un retour pédagogique.
 - **Mode invité** pour jouer immédiatement sans compte.
 - **Tableau d'administration** pour gérer les comptes et suivre l'activité.
 - **Quatre langues d'interface** (français, anglais, espagnol, chinois simplifié).
+- **Niveau scolaire facultatif** (six catégories + « Non renseigné »), autodéclaré à l'inscription
+  ou modifiable ensuite dans le profil. Le niveau est enregistré avec chaque résultat et ne modifie
+  jamais les règles de calcul des scores.
+- **Classements partagés** conservés sur le serveur (SQLite) et accessibles entre appareils, en
+  plus des **scores locaux** existants conservés dans le navigateur pour les invités.
+- **Filtres** des classements partagés : niveau scolaire, opération (addition / multiplication)
+  et type de questions (classique / à trou / mélange), plus un classement général tous niveaux.
+- **Meilleur résultat par utilisateur** dans chaque classement, avec départage déterministe par
+  score, puis durée, puis date.
+- **Durées des participants** enregistrées en millisecondes et utilisées pour départager les scores
+  égaux.
+- **Consultation publique** (sans connexion) des classements partagés.
 - **Interface responsive** s'adaptant aux petits écrans, avec pavé numérique tactile.
 
 ### À propos de l'entraînement adaptatif
@@ -177,12 +189,36 @@ osascript -l JavaScript tests/js_adaptive_integration_test.js
 
 ---
 
+## Niveaux scolaires et classements partagés
+
+La version **v12.8.0** ajoute les niveaux scolaires et les classements partagés à l'application :
+
+- **Facultatif et autodéclaré.** Le niveau scolaire est choisi par l'utilisateur (à l'inscription
+  ou dans le profil) parmi six catégories — *Maternelle et avant*, *Début élémentaire*, *Fin
+  élémentaire*, *Collège*, *Lycée*, *Supérieur et adultes* — plus **Non renseigné**. C'est une
+  simple préférence personnelle ; il ne modifie ni les règles de difficulté ni le calcul des scores.
+- **Niveau historique.** Chaque mission est enregistrée sur le serveur avec le niveau associé au
+  compte au moment où elle a été jouée. Les anciennes missions sans niveau sont classées en
+  **Non renseigné** et ne sont jamais déplacées rétroactivement.
+- **Les invités ne publient pas.** Les résultats des visiteurs restent stockés localement dans le
+  navigateur et n'apparaissent jamais dans le classement partagé.
+- **Classements partagés.** Seuls les résultats des comptes enregistrés y figurent, avec le
+  meilleur résultat par utilisateur dans chaque classement. Les titulaires de compte retrouvent
+  leurs données sur tous leurs appareils.
+- **Identités publiques.** Le classement partagé affiche l'identifiant public de chaque titulaire
+  de compte. Il n'expose jamais d'e-mails, d'identifiants internes, de rôles ni d'autres données
+  privées.
+
 ## Statut du projet et version
 
-**v12.6.0** est la version préparée pour publication sur cette branche. Elle apporte
-l'internationalisation en quatre langues, la synchronisation de la préférence linguistique par
-compte, ainsi que le moteur i18n, les catalogues et les tests associés — en plus de
-l'entraînement adaptatif de la v12.5.
+**v12.8.0** est la version préparée pour publication sur cette branche. Elle apporte les niveaux
+scolaires facultatifs avec traductions en quatre langues, une API de consultation et de
+modification du niveau du profil, la capture du niveau et de la durée pour chaque résultat, des
+classements partagés côté serveur (un meilleur résultat par utilisateur, filtrables par niveau,
+opération et type de questions, plus un classement général), une interface de consultation
+conservée aux côtés des scores locaux existants, ainsi qu'une correction des paramètres GET
+générés par l'API qui corrige aussi le filtrage de difficulté de l'entraînement adaptatif — le
+tout avec des migrations SQLite entièrement compatibles avec les données existantes.
 
 ---
 

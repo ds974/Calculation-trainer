@@ -39,15 +39,21 @@ final class ResultService
      * @param int    $score  score sur 10.
      * @param ?string $playedAt date/heure UTC de fin ; null => maintenant (UTC).
      * @param string $questionType type de questions (v12.3) : classic | hole | mixed.
+     * @param ?int   $durationMs durée de la partie en ms (v12.8-B2) ; null = inconnue.
+     * @param string $schoolLevel niveau scolaire HISTORIQUE figé (v12.8-B2), provient du
+     *                           profil authentifié en base (valeur 'unspecified' si NULL),
+     *                           JAMAIS d'un champ transmis par le client.
      * @return int identifiant du résultat enregistré.
-     * @throws InvalidArgumentException si mode, type de questions ou score invalide.
+     * @throws InvalidArgumentException si mode, type de questions, score ou durée invalide.
      */
     public function save(
         int $userId,
         string $mode,
         int $score,
         ?string $playedAt = null,
-        string $questionType = 'classic'
+        string $questionType = 'classic',
+        ?int $durationMs = null,
+        string $schoolLevel = 'unspecified'
     ): int {
         if (!Validator::mode($mode)) {
             throw new InvalidArgumentException('Mode de jeu invalide.');
@@ -58,10 +64,22 @@ final class ResultService
         if (!Validator::score($score)) {
             throw new InvalidArgumentException('Le score doit être un entier entre 0 et 10.');
         }
+        if ($durationMs !== null && !Validator::durationMs($durationMs)) {
+            throw new InvalidArgumentException('La durée doit être un entier strictement positif (ms).');
+        }
         if ($playedAt !== null && !$this->isUtcTimestamp($playedAt)) {
             throw new InvalidArgumentException('Date de fin invalide (format UTC attendu).');
         }
-        return $this->results->insert($userId, $mode, $score, $playedAt, null, $questionType);
+        return $this->results->insert(
+            $userId,
+            $mode,
+            $score,
+            $playedAt,
+            null,
+            $questionType,
+            $durationMs,
+            $schoolLevel
+        );
     }
 
     /**
@@ -93,6 +111,10 @@ final class ResultService
      *                         sa justesse RECALCULÉE serveur, cf. see apply).
      * @param ?string $playedAt date/heure UTC de fin ; null => maintenant (UTC).
      * @param string $questionType type global : classic | hole | mixed.
+     * @param ?int   $durationMs durée de la partie en ms (v12.8-B2) ; null = inconnue.
+     * @param string $schoolLevel niveau scolaire HISTORIQUE figé (v12.8-B2), provenant du
+     *                           profil authentifié en base (valeur 'unspecified' si NULL),
+     *                           JAMAIS d'un champ transmis par le client.
      * @return array{saved:bool, duplicate:bool, id:int|null}
      * @throws InvalidArgumentException en cas d'entrée invalide (transaction non ouverte).
      */
@@ -103,7 +125,9 @@ final class ResultService
         string $missionId,
         array $details,
         ?string $playedAt = null,
-        string $questionType = 'classic'
+        string $questionType = 'classic',
+        ?int $durationMs = null,
+        string $schoolLevel = 'unspecified'
     ): array {
         if (!Validator::mode($mode)) {
             throw new InvalidArgumentException('Mode de jeu invalide.');
@@ -113,6 +137,9 @@ final class ResultService
         }
         if (!Validator::score($score)) {
             throw new InvalidArgumentException('Le score doit être un entier entre 0 et 10.');
+        }
+        if ($durationMs !== null && !Validator::durationMs($durationMs)) {
+            throw new InvalidArgumentException('La durée doit être un entier strictement positif (ms).');
         }
         if ($playedAt !== null && !$this->isUtcTimestamp($playedAt)) {
             throw new InvalidArgumentException('Date de fin invalide (format UTC attendu).');
@@ -152,7 +179,9 @@ final class ResultService
                 $score,
                 $playedAt,
                 null,
-                $questionType
+                $questionType,
+                $durationMs,
+                $schoolLevel
             );
 
             // Mémoire des difficultés (recalcul serveur appliqué pour chaque événement).

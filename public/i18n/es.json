@@ -108,7 +108,18 @@
     "guestSuffix": "(invitado)",
     "yes": "Sí",
     "no": "No",
-    "holeMode": "Modo: {mode}"
+    "holeMode": "Modo: {mode}",
+    "viewSwitch": "Tipo de clasificación",
+    "shared": "Clasificación compartida",
+    "local": "Puntuaciones locales",
+    "levelFilter": "Nivel",
+    "typeFilter": "Tipo de preguntas",
+    "levelAll": "Todos los niveles",
+    "sharedLoading": "Cargando la clasificación…",
+    "sharedEmpty": "Sin resultados para estos criterios.",
+    "sharedError": "No se pudo cargar la clasificación.",
+    "columnRank": "Puesto",
+    "columnPlayer": "Jugador"
   },
   "stats": {
     "kicker": "Mi rendimiento",
@@ -342,6 +353,23 @@
     "userNotFound": "Usuario no encontrado.",
     "actionUnknown": "Acción desconocida."
   },
+  "schoolLevel": {
+    "title": "Nivel escolar",
+    "optional": "Nivel escolar (opcional)",
+    "unspecified": "No especificado",
+    "preschool": "Preescolar y antes",
+    "elementaryLower": "Primaria inicial",
+    "elementaryUpper": "Primaria superior",
+    "middleSchool": "Secundaria",
+    "highSchool": "Bachillerato",
+    "higherAdult": "Educación superior y adultos",
+    "saveButton": "Guardar nivel",
+    "saved": "Nivel guardado.",
+    "error": "Se produjo un error al guardar el nivel.",
+    "profileHelp": "Tu nivel sirve para personalizar las clasificaciones. Puedes cambiarlo cuando quieras.",
+    "registerHelp": "Opcional. Tu nivel sirve para personalizar las clasificaciones. Puedes cambiarlo cuando quieras."
+  },
+
   "error": {
     "internalServer": "Error interno del servidor.",
     "authRequired": "Se requiere autenticación.",
@@ -365,7 +393,8 @@
     "yes": "Sí",
     "no": "No",
     "retry": "Reintentar",
-    "seconds": "s"
+    "seconds": "s",
+    "saving": "Guardando..."
   },
   "aria": {
     "navAccount": "Navegación de la cuenta",
@@ -385,6 +414,7 @@
     "selectCalcType": "Elegir tipo de cálculo",
     "debrief": "Repaso de las preguntas",
     "top20Table": "Las 20 mejores puntuaciones",
+    "sharedTopTable": "Clasificación compartida",
     "searchAccount": "Buscar una cuenta",
     "progressionDetail": "Detalle de las puntuaciones de las últimas 30 partidas",
     "dailyDetail": "Partidas por día (últimos 30 días, días naturales de La Reunión)",

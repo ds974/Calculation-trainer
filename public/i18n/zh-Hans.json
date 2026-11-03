@@ -108,7 +108,18 @@
     "guestSuffix": "（访客）",
     "yes": "是",
     "no": "否",
-    "holeMode": "模式：{mode}"
+    "holeMode": "模式：{mode}",
+    "viewSwitch": "排名类型",
+    "shared": "共享排名",
+    "local": "本地分数",
+    "levelFilter": "等级",
+    "typeFilter": "题型",
+    "levelAll": "所有等级",
+    "sharedLoading": "正在加载排名…",
+    "sharedEmpty": "没有符合这些条件的结果。",
+    "sharedError": "无法加载排名。",
+    "columnRank": "排名",
+    "columnPlayer": "玩家"
   },
   "stats": {
     "kicker": "我的表现",
@@ -342,6 +353,23 @@
     "userNotFound": "未找到用户。",
     "actionUnknown": "未知操作。"
   },
+  "schoolLevel": {
+    "title": "学段",
+    "optional": "学段（可选）",
+    "unspecified": "未填写",
+    "preschool": "幼儿园及以前",
+    "elementaryLower": "小学低年级",
+    "elementaryUpper": "小学高年级",
+    "middleSchool": "初中",
+    "highSchool": "高中",
+    "higherAdult": "高等教育和成人",
+    "saveButton": "保存学段",
+    "saved": "学段已保存。",
+    "error": "保存学段时出错。",
+    "profileHelp": "你的学段用于个性化排名。你随时可以更改。",
+    "registerHelp": "可选。你的学段用于个性化排名。你随时可以更改。"
+  },
+
   "error": {
     "internalServer": "服务器内部错误。",
     "authRequired": "需要登录认证。",
@@ -365,7 +393,8 @@
     "yes": "是",
     "no": "否",
     "retry": "重试",
-    "seconds": "秒"
+    "seconds": "秒",
+    "saving": "保存中..."
   },
   "aria": {
     "navAccount": "账户导航",
@@ -385,6 +414,7 @@
     "selectCalcType": "选择运算类型",
     "debrief": "题目回顾",
     "top20Table": "成绩前 20 名",
+    "sharedTopTable": "共享排名",
     "searchAccount": "搜索账户",
     "progressionDetail": "最近 30 场游戏的得分详情",
     "dailyDetail": "每日游戏场次（近 30 天，按留尼汪岛当地日期）",

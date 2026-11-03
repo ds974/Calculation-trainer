@@ -62,6 +62,22 @@ final class AuthService
             $preferredLanguage = $lang;
         }
 
+        // Niveau scolaire FACULTATIF (v12.8-B3.1) : s'il est fourni et non nul,
+        // il doit être l'un des six identifiants stables. Absent ou null =>
+        // « Non renseigné » (colonne NULL). Le profil reste le lieu principal
+        // de modification ; ce champ à l'inscription n'est pas obligatoire.
+        $schoolLevel = null;
+        if (array_key_exists('school_level', $data)) {
+            $level = $data['school_level'];
+            if ($level !== null && !Validator::schoolLevel($level)) {
+                throw new InvalidArgumentException(
+                    'Niveau scolaire non reconnu. Valeurs acceptées : '
+                    . implode(', ', Validator::allowedSchoolLevels()) . '.'
+                );
+            }
+            $schoolLevel = $level;
+        }
+
         // Validation côté serveur.
         $err = Validator::login($login)
             ?? Validator::password($password);
@@ -80,6 +96,7 @@ final class AuthService
             'password'           => $password,
             'role'               => 'user',
             'preferred_language' => $preferredLanguage,
+            'school_level'       => $schoolLevel,
         ]);
 
         return $this->publicUser($this->users->findById($id));
@@ -216,6 +233,42 @@ final class AuthService
     }
 
     /**
+     * Modifie le niveau scolaire du compte authentifié (v12.8-B3.1).
+     *
+     * Accepte soit l'un des six identifiants stables (preschool, elementary_lower,
+     * elementary_upper, middle_school, high_school, higher_adult), soit NULL pour
+     * revenir à « Non renseigné ». Toute autre valeur (intitulé traduit, booléen,
+     * numérique, 'unspecified', chaîne arbitraire) est refusée en 400 sans
+     * modification : l'absence de niveau s'exprime par NULL, jamais par la chaîne
+     * 'unspecified' (réservée au niveau HISTORIQUE des parties dans `results`).
+     *
+     * Ne s'applique qu'au compte passé (celui de la session authentifiée) et ne
+     * modifie que le niveau scolaire : rôle, statut, mot de passe, langue,
+     * statistiques et historiques restent strictement inchangés.
+     *
+     * @param int $userId identifiant du compte (cellule de la session).
+     * @param string|null $schoolLevel nouveau niveau, ou NULL pour « Non renseigné ».
+     * @throws InvalidArgumentException si le niveau est invalide.
+     * @throws RuntimeException si l'utilisateur est introuvable.
+     * @return array<string,mixed> l'utilisateur public actualisé.
+     */
+    public function changeSchoolLevel(int $userId, ?string $schoolLevel): array
+    {
+        if (!Validator::schoolLevel($schoolLevel)) {
+            throw new InvalidArgumentException(
+                'Niveau scolaire non reconnu. Valeurs acceptées : '
+                . implode(', ', Validator::allowedSchoolLevels()) . ', ou null.'
+            );
+        }
+        $user = $this->users->findById($userId);
+        if ($user === null) {
+            throw new RuntimeException('Utilisateur introuvable.', 404);
+        }
+        $this->users->updateSchoolLevel($userId, $schoolLevel);
+        return $this->publicUser($this->users->findById($userId));
+    }
+
+    /**
      * Vérifie que l'utilisateur possède le rôle administrateur.
      *
      * @throws RuntimeException code 401 si non authentifié, 403 si non admin.
@@ -246,6 +299,9 @@ final class AuthService
             'is_active'          => isset($row['is_active']) ? (int)$row['is_active'] === 1 : true,
             'last_login_at'      => isset($row['last_login_at']) ? (string)$row['last_login_at'] : null,
             'preferred_language' => isset($row['preferred_language']) ? (string)$row['preferred_language'] : 'fr',
+            // Niveau scolaire (v12.8-B3.1) : l'un des six identifiants stables,
+            // ou null si « Non renseigné ». Exposé tel quel (aucune traduction).
+            'school_level'       => isset($row['school_level']) ? (string)$row['school_level'] : null,
         ];
     }
 
