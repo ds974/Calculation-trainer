@@ -43,8 +43,12 @@ final class ResultService
      * @param string $schoolLevel niveau scolaire HISTORIQUE figé (v12.8-B2), provient du
      *                           profil authentifié en base (valeur 'unspecified' si NULL),
      *                           JAMAIS d'un champ transmis par le client.
+     * @param mixed  $tables     description des tables utilisées (v12.8.1-B3) : tableau
+     *                           d'entiers (multiplication), objet {min,max} (addition),
+     *                           ou null si information absente/ancienne. Validée et
+     *                           normalisée ici avant persistance.
      * @return int identifiant du résultat enregistré.
-     * @throws InvalidArgumentException si mode, type de questions, score ou durée invalide.
+     * @throws InvalidArgumentException si mode, type de questions, score, durée ou tables invalide.
      */
     public function save(
         int $userId,
@@ -53,7 +57,8 @@ final class ResultService
         ?string $playedAt = null,
         string $questionType = 'classic',
         ?int $durationMs = null,
-        string $schoolLevel = 'unspecified'
+        string $schoolLevel = 'unspecified',
+        mixed $tables = null
     ): int {
         if (!Validator::mode($mode)) {
             throw new InvalidArgumentException('Mode de jeu invalide.');
@@ -70,6 +75,9 @@ final class ResultService
         if ($playedAt !== null && !$this->isUtcTimestamp($playedAt)) {
             throw new InvalidArgumentException('Date de fin invalide (format UTC attendu).');
         }
+        if (!Validator::tables($tables, $mode)) {
+            throw new InvalidArgumentException('Description des tables utilisées invalide.');
+        }
         return $this->results->insert(
             $userId,
             $mode,
@@ -78,7 +86,8 @@ final class ResultService
             null,
             $questionType,
             $durationMs,
-            $schoolLevel
+            $schoolLevel,
+            Validator::normalizeTables($tables, $mode)
         );
     }
 
@@ -115,6 +124,9 @@ final class ResultService
      * @param string $schoolLevel niveau scolaire HISTORIQUE figé (v12.8-B2), provenant du
      *                           profil authentifié en base (valeur 'unspecified' si NULL),
      *                           JAMAIS d'un champ transmis par le client.
+     * @param mixed  $tables     description des tables utilisées (v12.8.1-B3) : tableau
+     *                           d'entiers (multiplication), objet {min,max} (addition),
+     *                           ou null si information absente/ancienne.
      * @return array{saved:bool, duplicate:bool, id:int|null}
      * @throws InvalidArgumentException en cas d'entrée invalide (transaction non ouverte).
      */
@@ -127,7 +139,8 @@ final class ResultService
         ?string $playedAt = null,
         string $questionType = 'classic',
         ?int $durationMs = null,
-        string $schoolLevel = 'unspecified'
+        string $schoolLevel = 'unspecified',
+        mixed $tables = null
     ): array {
         if (!Validator::mode($mode)) {
             throw new InvalidArgumentException('Mode de jeu invalide.');
@@ -144,6 +157,9 @@ final class ResultService
         if ($playedAt !== null && !$this->isUtcTimestamp($playedAt)) {
             throw new InvalidArgumentException('Date de fin invalide (format UTC attendu).');
         }
+        if (!Validator::tables($tables, $mode)) {
+            throw new InvalidArgumentException('Description des tables utilisées invalide.');
+        }
         if (!is_string($missionId) || trim($missionId) === '' || strlen($missionId) > 100) {
             throw new InvalidArgumentException('Identifiant de mission invalide.');
         }
@@ -154,6 +170,7 @@ final class ResultService
         // Validation des détails AVANT d'ouvrir la transaction : si invalides, on
         // lève immédiatement sans créer de transaction ni écrire quoi que ce soit.
         $events = $this->difficulties->validateDetails($details);
+        $tablesJson = Validator::normalizeTables($tables, $mode);
 
         $this->pdo->beginTransaction();
         try {
@@ -181,7 +198,8 @@ final class ResultService
                 null,
                 $questionType,
                 $durationMs,
-                $schoolLevel
+                $schoolLevel,
+                $tablesJson
             );
 
             // Mémoire des difficultés (recalcul serveur appliqué pour chaque événement).

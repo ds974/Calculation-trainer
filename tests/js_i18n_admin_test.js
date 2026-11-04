@@ -64,7 +64,7 @@ FILES.forEach(function (locale) {
 check("les 4 catalogues sont chargés", FILES.every(function (l) { return catalogs[l]; }), "");
 FILES.forEach(function (locale) {
   var n = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).length : -1;
-  check("catalogue (" + locale + ") : 392 clés", n === 392, "n=" + n);
+  check("catalogue (" + locale + ") : 393 clés", n === 393, "n=" + n);
 });
 
 // ==================================================================== MOTEUR

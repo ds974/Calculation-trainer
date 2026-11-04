@@ -29,6 +29,8 @@ final class ResultRepository
      *                           null = inconnue (historique / client ancien).
      * @param string $schoolLevel niveau scolaire figé (v12.8-B1/B2) :
      *                           l'un des sept identifiants, 'unspecified' par défaut.
+     * @param ?string $tablesJson description JSON canonique des tables utilisées
+     *                           (v12.8.1-B3), ou null si information absente/ancienne.
      * @return int identifiant de la ligne insérée.
      */
     public function insert(
@@ -39,15 +41,16 @@ final class ResultRepository
         ?string $guestId = null,
         string $questionType = 'classic',
         ?int $durationMs = null,
-        string $schoolLevel = 'unspecified'
+        string $schoolLevel = 'unspecified',
+        ?string $tablesJson = null
     ): int {
         $stmt = $this->pdo->prepare(
             'INSERT INTO results
-                (user_id, mode, score, played_at, guest_id, question_type, duration_ms, school_level)
+                (user_id, mode, score, played_at, guest_id, question_type, duration_ms, school_level, tables)
              VALUES
                 (:user_id, :mode, :score,
                  COALESCE(:played_at, strftime(\'%Y-%m-%dT%H:%M:%SZ\', \'now\')),
-                 :guest_id, :question_type, :duration_ms, :school_level)'
+                 :guest_id, :question_type, :duration_ms, :school_level, :tables)'
         );
         $stmt->execute([
             'user_id'       => $userId,
@@ -58,6 +61,7 @@ final class ResultRepository
             'question_type' => $questionType,
             'duration_ms'   => $durationMs,
             'school_level'  => $schoolLevel,
+            'tables'        => $tablesJson,
         ]);
         return (int)$this->pdo->lastInsertId();
     }

@@ -73,7 +73,7 @@ final class LeaderboardService
      *              mode:string,
      *              school_level:string,
      *              question_type:string,
-     *              entries:array<int,array{rank:int,display_name:string,score:int,duration_ms:?int,played_at:string}>}
+     *              entries:array<int,array{rank:int,display_name:string,score:int,duration_ms:?int,played_at:string,tables:array<int,int>|array{min:int,max:int}|null}>}
      * @throws InvalidArgumentException si un filtre est invalide.
      */
     public function leaderboard(
@@ -95,13 +95,14 @@ final class LeaderboardService
             throw new InvalidArgumentException('Limite invalide.');
         }
 
-        $sql = 'SELECT best.score, best.duration_ms, best.played_at, best.display_name
+        $sql = 'SELECT best.score, best.duration_ms, best.played_at, best.display_name, best.tables
                 FROM (
                     SELECT
                         r.id,
                         r.score,
                         r.duration_ms,
                         r.played_at,
+                        r.tables,
                         u.login AS display_name,
                         ROW_NUMBER() OVER (
                             PARTITION BY r.user_id
@@ -154,6 +155,9 @@ final class LeaderboardService
                 'score'        => (int)$row['score'],
                 'duration_ms'  => $row['duration_ms'] !== null ? (int)$row['duration_ms'] : null,
                 'played_at'    => (string)$row['played_at'],
+                'tables'       => Validator::decodeTables(
+                    isset($row['tables']) && is_string($row['tables']) ? $row['tables'] : null
+                ),
             ];
         }
 

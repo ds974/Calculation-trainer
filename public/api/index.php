@@ -252,6 +252,25 @@ try {
                 ? (string)$freshUser['school_level']
                 : 'unspecified';
 
+            $mode = (string)($parsed['mode'] ?? '');
+
+            // v12.8.1-B3 — tables effectivement utilisées pendant la partie
+            // (optionnelles, rétrocompatible : absence => non renseignées).
+            //  - multiplication : tableau d'entiers [1,2,5]
+            //  - addition : objet {"min":int,"max":int}
+            // Toute forme ou valeur hors bornes est REJETÉE (HTTP 400). Le serveur
+            // normalise ensuite en chaîne JSON canonique avant persistance.
+            $tables = null;
+            if (array_key_exists('tables', $parsed)) {
+                if (!Validator::tables($parsed['tables'], $mode)) {
+                    Response::error(
+                        'Description des tables utilisées invalide (multiplication : tableau 1-10 ; addition : {min,max} 1-99).',
+                        400
+                    );
+                }
+                $tables = $parsed['tables'];
+            }
+
             $hasMission = isset($parsed['mission_id']) && is_string($parsed['mission_id'])
                 && trim($parsed['mission_id']) !== ''
                 && isset($parsed['details']) && is_array($parsed['details']);
@@ -259,14 +278,15 @@ try {
             if ($hasMission) {
                 $outcome = $results->saveWithMission(
                     (int)$user['id'],
-                    (string)($parsed['mode'] ?? ''),
+                    $mode,
                     (int)($parsed['score'] ?? -1),
                     (string)$parsed['mission_id'],
                     $parsed['details'],
                     $playedAt,
                     (string)($parsed['question_type'] ?? 'classic'),
                     $durationMs,
-                    $schoolLevel
+                    $schoolLevel,
+                    $tables
                 );
                 if ($outcome['duplicate']) {
                     // Mission déjà enregistrée : réponse de succès cohérente au
@@ -281,12 +301,13 @@ try {
 
             $resultId = $results->save(
                 (int)$user['id'],
-                (string)($parsed['mode'] ?? ''),
+                $mode,
                 (int)($parsed['score'] ?? -1),
                 $playedAt,
                 (string)($parsed['question_type'] ?? 'classic'),
                 $durationMs,
-                $schoolLevel
+                $schoolLevel,
+                $tables
             );
             Response::success(['result' => ['id' => $resultId]], 201);
             break;

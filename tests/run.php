@@ -72,6 +72,10 @@ final class TestRunner
         // filtres mode/niveau/type/limite, comptes actifs uniquement, confidentialité).
         $this->testLeaderboardService();
 
+        // v12.8.1-B3 : persistance et exposition des tables utilisées dans les
+        // classements partagés (schéma, service, validation, fidélité à la partie).
+        $this->testTablesB3();
+
         // Étape 3 : enregistrement des résultats et historique (l'import invité a
         // été retiré en v12.2 — plus de route serveur, plus de méthode importGuest).
         $this->testResultSave();
@@ -1370,6 +1374,8 @@ final class TestRunner
                 'Ancien schéma migré : users.school_level ajoutée');
             $this->check(in_array('school_level', $mResultsCols, true),
                 'Ancien schéma migré : results.school_level ajoutée');
+            $this->check(in_array('tables', $mResultsCols, true),
+                'Ancien schéma migré : results.tables ajoutée (B3)');
             $this->check(
                 $mpdo->query("SELECT school_level FROM users WHERE id = {$oldUid}")->fetchColumn() === null,
                 'Ancien utilisateur migré → users.school_level = NULL (Non renseigné)'
@@ -1393,7 +1399,7 @@ final class TestRunner
             $uCount = count(array_column($mpdo2->query("PRAGMA table_info(users)")->fetchAll(), 'name'));
             $rCount = count(array_column($mpdo2->query("PRAGMA table_info(results)")->fetchAll(), 'name'));
             $this->check($uCount === 10, 'Migration ré-exécutable : users non remaniée (idempotente)');
-            $this->check($rCount === 9, 'Migration ré-exécutable : results non remaniée (idempotente)');
+            $this->check($rCount === 10, 'Migration ré-exécutable : results non remaniée (idempotente)');
 
             // 6) Index existants conservés + nouvel index présent.
             $idx = $mpdo2->query(
@@ -1538,6 +1544,7 @@ final class TestRunner
             $mpdo = $migDb->pdo();
             $mCols = array_column($mpdo->query("PRAGMA table_info(results)")->fetchAll(), 'name');
             $this->check(in_array('duration_ms', $mCols, true), 'Ancien schéma migré : duration_ms ajoutée');
+            $this->check(in_array('tables', $mCols, true), 'Ancien schéma migré : results.tables ajoutée (B3)');
             $this->check(
                 $mpdo->query("SELECT duration_ms FROM results WHERE id = {$oldRid}")->fetchColumn() === null,
                 'Ancienne partie migrée → duration_ms = NULL (duree inconnue, jamais inventée)'
@@ -1553,7 +1560,7 @@ final class TestRunner
             $migDb2 = new Database($oldRoot);
             $mpdo2 = $migDb2->pdo();
             $count = count(array_column($mpdo2->query("PRAGMA table_info(results)")->fetchAll(), 'name'));
-            $this->check($count === 9, 'Migration durée ré-exécutable : results non remaniée (idempotente)');
+            $this->check($count === 10, 'Migration durée ré-exécutable : results non remaniée (idempotente, 10 colonnes)');
 
             // 6) Index historiques + nouvel index B1 toujours présents.
             $idx = $mpdo2->query(
@@ -1713,12 +1720,12 @@ final class TestRunner
             $make('inactive2'); // compte désactivé -> exclu
 
             // p1 : trois parties dans elementary_upper (multiplication, classic).
-            //   - 8/10 en 30000 ms
-            //   - 10/10 en 65000 ms
-            //   - 10/10 en 48000 ms  => meilleur = 10/10 / 48000 ms
-            $results->save($uid['p1'], 'multiplication', 8, '2026-01-01T09:00:00Z', 'classic', 30000, 'elementary_upper');
-            $results->save($uid['p1'], 'multiplication', 10, '2026-01-02T09:00:00Z', 'classic', 65000, 'elementary_upper');
-            $results->save($uid['p1'], 'multiplication', 10, '2026-01-03T09:00:00Z', 'classic', 48000, 'elementary_upper');
+            //   - 8/10 en 30000 ms   (tables partiellement conservées)
+            //   - 10/10 en 65000 ms  (tables [1,2,5])
+            //   - 10/10 en 48000 ms  (tables [1,2,3,4,5])  => meilleur = 10/10 / 48000 ms
+            $results->save($uid['p1'], 'multiplication', 8, '2026-01-01T09:00:00Z', 'classic', 30000, 'elementary_upper', [1, 2]);
+            $results->save($uid['p1'], 'multiplication', 10, '2026-01-02T09:00:00Z', 'classic', 65000, 'elementary_upper', [1, 2, 5]);
+            $results->save($uid['p1'], 'multiplication', 10, '2026-01-03T09:00:00Z', 'classic', 48000, 'elementary_upper', [1, 2, 3, 4, 5]);
 
             // p2 : 9/10 en 20000 ms (score inférieur => passe derrière p1 malgré la durée).
             $results->save($uid['p2'], 'multiplication', 9, '2026-01-04T09:00:00Z', 'classic', 20000, 'elementary_upper');
@@ -1778,6 +1785,18 @@ final class TestRunner
             }
             $this->check($p1best !== null && $p1best['score'] === 10 && $p1best['duration_ms'] === 48000,
                 'meilleur score retenu (10/10) et meilleure durée à score égal (48000 ms)');
+            // B3 : la ligne retenue porte les tables de la PARTIE RETENUE (10/10/48000 ms
+            // => [1,2,3,4,5]), et non celles d'une autre partie (8/10 => [1,2]
+            // ou 10/10/65000 ms => [1,2,5]).
+            $this->check($p1best !== null && ($p1best['tables'] ?? null) === [1, 2, 3, 4, 5],
+                'B3 : les tables de la partie retenue (48000 ms) sont exposées ([1,2,3,4,5])');
+            // Vérifie qu'aucune autre partie de p1 (ni celle à 8/10 ni celle à 65000 ms)
+            // n'est utilisée : la valeur retournée correspond EXACTEMENT à la partie retenue.
+            // Une seule partie sur les trois doit conserver la sélection [1,2,3,4,5].
+            $others = $pdo->query("SELECT tables FROM results WHERE user_id = {$uid['p1']}")
+                ->fetchAll(PDO::FETCH_COLUMN);
+            $this->check(count(array_filter($others, fn ($t) => $t === '[1,2,3,4,5]')) === 1,
+                'B3 : une seule partie conserve la sélection [1,2,3,4,5] (la partie retenue)');
 
             // 7. Score prioritaire sur durée : p2 (9/20000) passe derrière p1 (10/48000).
             $this->check($byLevel['entries'][3]['display_name'] === 'p2', 'score prioritaire sur durée (p2 derrière p1/p3/p4)');
@@ -1859,6 +1878,159 @@ final class TestRunner
             echo "  -> classement partagé (service) OK\n";
         } catch (Throwable $e) {
             $this->check(false, 'Classement partagé (service v12.8-B4.1) : ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * v12.8.1-B3 : persistance et exposition des tables utilisées dans les classements partagés.
+     *
+     * Couvre :
+     *  1. une partie avec tables [1,2,5] conserve exactement cette sélection ;
+     *  2. une partie « 1 à 10 » en multiplication ([1..10]) conserve toutes ses tables ;
+     *  3. deux parties d'un même joueur avec des tables différentes conservent leurs valeurs ;
+     *  4. la meilleure partie exposée dans le classement renvoie SES PROPRES tables ;
+     *  5/6/7. filtres niveau / mode / type toujours fonctionnels avec les tables ;
+     *  8/9. anciens résultats (tables NULL) => decodeTables null => libellé traduit côté UI ;
+     *  10/11. entrées malformées et valeurs hors plage rejetées par save() ;
+     *  12. les invités restent exclus (jamais de table leakée) ;
+     *  15/16. migration idempotente : colonne `tables` ajoutée sans perte (couvert aussi
+     *         dans testSchoolLevelMigration/testDurationSchemaAndMigration).
+     */
+    private function testTablesB3(): void
+    {
+        echo "[Tables des classements partagés (v12.8.1-B3)]\n";
+        $db = null;
+        try {
+            $root = $this->tmpRoot . DIRECTORY_SEPARATOR . 'b3_' . uniqid();
+            mkdir($root, 0775, true);
+            $db = new Database($root);
+            $pdo = $db->pdo();
+            $repo = new UserRepository($pdo);
+            $results = new ResultService($pdo, new ResultRepository($pdo));
+            $lb = new LeaderboardService($pdo);
+
+            $uid = [];
+            $mk = function (string $login) use (&$uid, $repo): int {
+                $uid[$login] = $repo->create([
+                    'login' => $login, 'password' => 'motdepasse10', 'role' => 'user',
+                ]);
+                return $uid[$login];
+            };
+            $mk('alice');
+            $mk('bob');
+            $mk('carol');
+
+            // 1. Multiplication, tables [1,2,5] : conservation exacte.
+            $rid1 = $results->save($uid['alice'], 'multiplication', 10, '2026-02-01T08:00:00Z',
+                'classic', 22000, 'elementary_upper', [1, 2, 5]);
+            $this->check($rid1 > 0, '1. enregistrement avec tables [1,2,5] accepté');
+            $stored = $pdo->query("SELECT tables FROM results WHERE id = {$rid1}")->fetchColumn();
+            $this->check($stored === '[1,2,5]', '1. tables [1,2,5] conservées exactement (' . $stored . ')');
+
+            // 2. « 1 à 10 » : toutes les tables de multiplication conservées.
+            $rid2 = $results->save($uid['bob'], 'multiplication', 10, '2026-02-02T08:00:00Z',
+                'classic', 35000, 'elementary_upper', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            $this->check($rid2 > 0, '2. enregistrement « 1 à 10 » (10 tables) accepté');
+            $stored2 = $pdo->query("SELECT tables FROM results WHERE id = {$rid2}")->fetchColumn();
+            $expected10 = json_encode([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            $this->check($stored2 === $expected10, '2. « 1 à 10 » conservées en entier');
+
+            // 3. Deux parties du même joueur avec des tables différentes.
+            $rid3a = $results->save($uid['carol'], 'multiplication', 9, '2026-02-03T08:00:00Z',
+                'classic', 30000, 'elementary_upper', [3, 4]);
+            $rid3b = $results->save($uid['carol'], 'multiplication', 9, '2026-02-04T08:00:00Z',
+                'classic', 30000, 'elementary_upper', [3, 4, 6, 7]);
+            $t3a = $pdo->query("SELECT tables FROM results WHERE id = {$rid3a}")->fetchColumn();
+            $t3b = $pdo->query("SELECT tables FROM results WHERE id = {$rid3b}")->fetchColumn();
+            $this->check($t3a === '[3,4]' && $t3b === '[3,4,6,7]',
+                '3. deux parties : chaque partie garde SES tables (indépendantes)');
+
+            // 4. Le classement expose les tables de la MEILLEURE partie retenue.
+            //    carol a deux parties identiques 9/30000 ms -> départage par date puis id :
+            //    la partie la plus ancienne (rid3a, [3,4]) est retenue.
+            $lbRes = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $carolEntry = null;
+            foreach ($lbRes['entries'] as $e) {
+                if ($e['display_name'] === 'carol') { $carolEntry = $e; }
+            }
+            $this->check($carolEntry !== null && ($carolEntry['tables'] ?? null) === [3, 4],
+                '4. le classement renvoie les tables de la partie retenue ([3,4], pas [3,4,6,7])');
+
+            // 5/6/7. Les filtres niveau / mode / type restent fonctionnels avec tables.
+            $byLevel = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $this->check(count($byLevel['entries']) === 3,
+                '5. filtre niveau : 3 joueurs (elementary_upper)');
+            // mode addition : plage {1..10}
+            $results->save($uid['alice'], 'addition', 8, '2026-02-05T08:00:00Z',
+                'classic', 15000, 'elementary_upper', ['min' => 1, 'max' => 10]);
+            $addLb = $lb->leaderboard('addition', 'elementary_upper', 'classic', 20);
+            $this->check(count($addLb['entries']) === 1 && $addLb['entries'][0]['display_name'] === 'alice'
+                    && ($addLb['entries'][0]['tables'] ?? null) === ['min' => 1, 'max' => 10],
+                '6. filtre mode addition : tables {1..10} exposées sous forme plage');
+            $holeLb = $lb->leaderboard('multiplication', 'elementary_upper', 'hole', 20);
+            $this->check($holeLb['entries'] === [], '7. filtre type hole : aucune partie');
+
+            // 8/9. Ancien résultat sans tables : NULL stocké, decodeTables => null
+            //      (côté UI, libellé traduit « Non renseignées »).
+            // On isole une partie ANCIENNE sur un compte (dave) sans autre partie,
+            // insérée sans colonne `tables` (=> NULL) pour simuler un résultat pré-B3.
+            $mk('dave');
+            $pdo->prepare('INSERT INTO results (user_id, mode, score, played_at, question_type, duration_ms, school_level)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$uid['dave'], 'multiplication', 7, '2024-03-01T10:00:00Z', 'classic', 5000, 'elementary_upper']);
+            $oldLb = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $daveOld = null;
+            foreach ($oldLb['entries'] as $e) {
+                if ($e['display_name'] === 'dave') { $daveOld = $e; }
+            }
+            $this->check($daveOld !== null && $daveOld['tables'] === null
+                    && $daveOld['score'] === 7 && $daveOld['duration_ms'] === 5000,
+                '8/9. ancien résultat sans tables : champ null, score intact (UI « Non renseignées »)');
+
+            // 10. Entrées malformées rejetées (multiplication). Les doublons [1,2,2]
+            //     sont acceptés et normalisés (dédupliqués) : ils ne sont PAS malformés.
+            $rej = 0;
+            foreach ([
+                'abc', 42, true, [1, 'deux'], [0, 1], [11], [-1],
+                ['a' => 1], [1.5], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            ] as $bad) {
+                try {
+                    $results->save($uid['alice'], 'multiplication', 5, null, 'classic', 1000, 'elementary_upper', $bad);
+                } catch (InvalidArgumentException) {
+                    $rej++;
+                }
+            }
+            $this->check($rej === 10, '10. tables malformées rejetées (' . $rej . '/10)');
+            // Addition : plage invalide ou absence de clés rejetée.
+            $rejAdd = 0;
+            foreach ([[], ['min' => 5, 'max' => 2], ['min' => 0, 'max' => 5], ['min' => 1, 'max' => 100], 'x'] as $bad) {
+                try {
+                    $results->save($uid['alice'], 'addition', 5, null, 'classic', 1000, 'elementary_upper', $bad);
+                } catch (InvalidArgumentException) {
+                    $rejAdd++;
+                }
+            }
+            $this->check($rejAdd === 5, '10b. plages d\'additions invalides rejetées (' . $rejAdd . '/5)');
+
+            // 11. Valeurs hors plage explicitement rejetées [0], [11], [-1].
+            $rejRange = 0;
+            foreach ([[0], [11], [-1]] as $outRange) {
+                try {
+                    $results->save($uid['alice'], 'multiplication', 5, null, 'classic', 1000, 'elementary_upper', $outRange);
+                } catch (InvalidArgumentException) {
+                    $rejRange++;
+                }
+            }
+            $this->check($rejRange === 3, '11. valeurs hors plage rejetées (' . $rejRange . '/3)');
+
+            // 12. Les invités restent exclus du classement partagé.
+            $invLb = $lb->leaderboard('multiplication', 'elementary_upper', 'classic', 20);
+            $this->check(count($invLb['entries']) === 4,
+                '12. aucun joueur invité dans le classement partagé (alice/bob/carol/dave, tables jamais exposées)');
+
+            echo "  -> tables des classements partagés (v12.8.1-B3) OK\n";
+        } catch (Throwable $e) {
+            $this->check(false, 'Tables classements partagés (v12.8.1-B3) : ' . $e->getMessage());
         }
     }
 

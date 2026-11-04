@@ -105,6 +105,7 @@
     "columnHole": "Missing value",
     "columnDetailMult": "Tables used",
     "columnDetailAdd": "Range used",
+    "tablesUnknown": "Not specified",
     "guestSuffix": "(guest)",
     "yes": "Yes",
     "no": "No",

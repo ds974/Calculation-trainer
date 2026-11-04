@@ -1266,8 +1266,8 @@ expect('aucun user_id exposé', strpos($flat, '"user_id"') === false && strpos($
 expect('aucun rôle/hash exposé', strpos($flat, 'password') === false && stripos($flat, 'admin') === false);
 $first = is_array($entries) && count($entries) > 0 ? $entries[0] : null;
 $firstKeys = is_array($first) ? array_keys($first) : [];
-expect("entrées n'exposent que rank/display_name/score/duration_ms/played_at",
-    count(array_diff($firstKeys, ['rank', 'display_name', 'score', 'duration_ms', 'played_at'])) === 0,
+expect("entrées n'exposent que rank/display_name/score/duration_ms/played_at/tables",
+    count(array_diff($firstKeys, ['rank', 'display_name', 'score', 'duration_ms', 'played_at', 'tables'])) === 0,
     implode(',', $firstKeys));
 
 // ---- 8. Séparation classic / hole / mixed ----

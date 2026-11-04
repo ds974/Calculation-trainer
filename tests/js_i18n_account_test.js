@@ -6,13 +6,13 @@
 //
 // Ce test vérifie que les écrans de connexion, d'inscription et de compte
 // (public/index.html + public/account.js) sont internationalisés à partir des
-// QUATRE catalogues (fr, en, es, zh-Hans), désormais à 392 clés chacun, sans
+// QUATRE catalogues (fr, en, es, zh-Hans), désormais à 393 clés chacun, sans
 // clé orpheline ni texte codé en dur dans les parcours visibles, tout en
 // préservant intégralement les mécanismes d'authentification.
 //
 // Couverture (§10 de la mission) :
 //   1. clés d'authentification (auth) et de compte (account) ;
-//   2. complétude des quatre catalogues (392 clés, structures identiques) ;
+//   2. complétude des quatre catalogues (393 clés, structures identiques) ;
 //   3. attributs HTML localisés (data-i18n / data-i18n-placeholder) des écrans
 //      de connexion, d'inscription et de compte ;
 //   4. messages de connexion (saisie, progression, succès, déconnexion, session) ;
@@ -80,10 +80,10 @@ FILES.forEach(function (locale) {
 check("les 4 catalogues sont chargés", catOk && FILES.every(function (l) { return catalogs[l]; }), "");
 
 var refKeys = flatCatalogs["fr"] ? Object.keys(flatCatalogs["fr"]).sort() : [];
-check("nombre de clés français = 392", refKeys.length === 392, "trouvées : " + refKeys.length);
+check("nombre de clés français = 393", refKeys.length === 393, "trouvées : " + refKeys.length);
 FILES.forEach(function (locale) {
   var keys = flatCatalogs[locale] ? Object.keys(flatCatalogs[locale]).sort() : [];
-  check("nombre de clés (" + locale + ") = 392", keys.length === 392, "trouvées : " + keys.length);
+  check("nombre de clés (" + locale + ") = 393", keys.length === 393, "trouvées : " + keys.length);
 });
 var refSet = {};
 refKeys.forEach(function (k) { refSet[k] = true; });

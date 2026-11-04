@@ -242,6 +242,17 @@ final class Database
                                                 'high_school', 'higher_adult'))");
         }
 
+        // --- Migration v12.8.1-B3 (idempotente, non destructive) : tables utilisées.
+        // Ajoute la colonne `tables` (NULL = « Non renseignées ») aux bases créées
+        // avant v12.8.1. Elle contient une description JSON canonique des tables :
+        //  - multiplication : tableau d'entiers trié/dédupliqué (ex. '[1,2,5]') ;
+        //  - addition : objet {"min":int,"max":int} (ex. '{"min":1,"max":10}').
+        // Les anciennes parties (NULL) restent valides et aucun score n'est modifié.
+        $resultsCols2 = $pdo->query("PRAGMA table_info(results)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (is_array($resultsCols2) && !in_array('tables', $resultsCols2, true)) {
+            $pdo->exec('ALTER TABLE results ADD COLUMN tables TEXT');
+        }
+
         // Table de limitation des tentatives de connexion (anti brute-force).
         $pdo->exec("CREATE TABLE IF NOT EXISTS login_attempts (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,

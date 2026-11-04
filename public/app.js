@@ -96,6 +96,9 @@ const leaderboardState = {
   schoolLevel: "unspecified",
   questionType: "classic",
   requestId: 0,
+  // Dernières données reçues du classement partagé, pour re-rendu local
+  // (ex. changement de langue) sans nouvel appel réseau.
+  data: null,
 };
 
 /** Convertit le mode interne JS vers l'identifiant API du classement partagé. */
@@ -1221,6 +1224,11 @@ async function saveConnectedResult() {
         playedAt: new Date().toISOString(),
         missionId: state.missionId || undefined,
         durationMs: Math.round(state.finalScore.time * 1000),
+        // v12.8.1-B3 : tables effectivement utilisées — tableau d'entiers pour les
+        // multiplications, objet {min,max} de la plage pour les additions.
+        tables: state.config.mode === "add"
+          ? { min: state.config.add.min, max: state.config.add.max }
+          : [...(state.finalScore.tables || [])],
         details,
       });
     }
@@ -1644,11 +1652,23 @@ function switchLeaderboardMode(mode) {
   activateLeaderboardTab(mode);
   syncLeaderboardFilterControls();
   renderLeaderboardHeadline();
+  updateSharedDetailHeader(mode);
   if (leaderboardState.view === "shared") {
     loadSharedLeaderboard();
   } else {
     renderLeaderboard("leaderboardBody", "leaderboardEmpty", mode);
   }
+}
+
+/** Met à jour l'en-tête « Tables utilisées » / « Plage utilisée » du tableau partagé. */
+function updateSharedDetailHeader(mode) {
+  const header = document.getElementById("sharedLeaderboardDetailHeader");
+  if (!header) return;
+  header.textContent = i18nT(
+    mode === "add" ? "leaderboard.columnDetailAdd" : "leaderboard.columnDetailMult",
+    null,
+    mode === "add" ? "Plage utilisée" : "Tables utilisées"
+  );
 }
 
 // --- B4.2 — Interface des classements partagés ---
@@ -1671,6 +1691,9 @@ function renderLeaderboardView() {
   if (shared) shared.hidden = leaderboardState.view !== "shared";
   if (local) local.hidden = leaderboardState.view !== "local";
   if (filters) filters.hidden = leaderboardState.view !== "shared";
+  if (leaderboardState.view === "shared") {
+    updateSharedDetailHeader(leaderboardState.mode);
+  }
 }
 
 /** Bascule entre Classement partagé et Scores locaux. */
@@ -1738,10 +1761,18 @@ function renderSharedLeaderboardState() {
   const tbody = document.getElementById("sharedLeaderboardBody");
   if (!tbody || !tbody.childElementCount) {
     // Aucune donnée déjà chargée : on relance le chargement.
+    if (leaderboardState.data) {
+      renderSharedLeaderboard(leaderboardState.data);
+      return;
+    }
     loadSharedLeaderboard();
+    return;
   }
-  // Si des rangées existent, les libellés statiques ont déjà été retraduits par
-  // le moteur i18n ; on ne modifie ni les sélections ni les données.
+  // Des rangées existent : on les re-rend à partir des données mises en cache
+  // pour retraduire les libellés (ex. « Non renseignées ») sans nouvel appel.
+  if (leaderboardState.data) {
+    renderSharedLeaderboard(leaderboardState.data);
+  }
 }
 
 /** Affiche uniquement le message d'état demandé dans le bloc partagé. */
@@ -1762,6 +1793,41 @@ function formatSharedDuration(durationMs) {
   const seconds = Number(durationMs) / 1000;
   if (!Number.isFinite(seconds)) return "—";
   return `${seconds.toFixed(1)} s`;
+}
+
+/**
+ * Formate la description des tables d'un résultat du classement partagé.
+ *  - multiplication : liste d'entiers triés/dédupliqués jointes par « , »
+ *    (même convention que le classement local) ; un jeu complet 1..10
+ *    s'affiche de façon compacte « 1 à 10 ».
+ *  - addition : plage {min,max} -> « 1 à 10 ».
+ *  - inconnu / absent (anciennes parties) : libellé traduit « Non renseignées ».
+ */
+function formatSharedTables(tables, mode) {
+  const unknownLabel = i18nT("leaderboard.tablesUnknown", null, "Non renseignées");
+  if (tables === null || tables === undefined) return unknownLabel;
+
+  if (mode === "add") {
+    const min = Number(tables && tables.min);
+    const max = Number(tables && tables.max);
+    if (!Number.isInteger(min) || !Number.isInteger(max)) return unknownLabel;
+    return min === max ? `${min}` : `${min} à ${max}`;
+  }
+
+  // multiplication : tableau d'entiers trié/dédupliqué.
+  if (!Array.isArray(tables) || tables.length === 0) return unknownLabel;
+  const nums = tables
+    .map(Number)
+    .filter((n) => Number.isInteger(n))
+    .sort((a, b) => a - b);
+  if (nums.length === 0) return unknownLabel;
+
+  // Jeu complet 1..10 -> « 1 à 10 » (forme compacte, plus lisible qu'une longue liste).
+  const isFull = nums.length === 10 && nums[0] === 1 && nums[nums.length - 1] === 10;
+  if (isFull) return `${nums[0]} à ${nums[nums.length - 1]}`;
+
+  // Sinon, même convention que le classement local : jointure par « , ».
+  return nums.join(", ");
 }
 
 /**
@@ -1792,6 +1858,7 @@ async function loadSharedLeaderboard() {
 
 /** Construit les rangées du tableau partagé (aucune insertion via innerHTML). */
 function renderSharedLeaderboard(data) {
+  leaderboardState.data = data;
   const entries = Array.isArray(data && data.entries) ? data.entries : [];
   const tbody = document.getElementById("sharedLeaderboardBody");
   if (tbody) tbody.innerHTML = "";
@@ -1803,6 +1870,7 @@ function renderSharedLeaderboard(data) {
 
   showSharedLeaderboardState("table");
 
+  const mode = leaderboardState.mode;
   entries.forEach((entry) => {
     const row = document.createElement("tr");
 
@@ -1819,7 +1887,12 @@ function renderSharedLeaderboard(data) {
     const time = document.createElement("td");
     time.textContent = formatSharedDuration(entry && entry.duration_ms);
 
-    row.append(rank, name, score, time);
+    // v12.8.1-B3 : colonne « Tables utilisées » (ou plage pour les additions).
+    const tablesCell = document.createElement("td");
+    tablesCell.className = "tables-cell";
+    tablesCell.textContent = formatSharedTables(entry && entry.tables, mode);
+
+    row.append(rank, name, score, time, tablesCell);
     tbody.appendChild(row);
   });
 }

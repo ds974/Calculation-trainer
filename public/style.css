@@ -565,6 +565,7 @@ th {
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:nth-child(even) { background: rgba(218, 228, 230, .27); }
 .leaderboard-table { width: 100%; min-width: 590px; }
+.leaderboard-table td.tables-cell { white-space: nowrap; }
 .debrief-table { width: max-content; max-width: 100%; }
 .debrief-table th, .debrief-table td { white-space: nowrap; }
 .debrief-table td.time-cell { color: var(--muted); font-size: .9rem; font-weight: 400; }

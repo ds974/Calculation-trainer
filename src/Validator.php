@@ -115,6 +115,107 @@ final class Validator
     /** Borne supérieure raisonnable d'une durée de partie, en millisecondes (30 min). */
     public const MAX_DURATION_MS = 1_800_000;
 
+    /** Bornes des tables de multiplication : 1 à 10. */
+    public const MULT_TABLE_MIN = 1;
+    public const MULT_TABLE_MAX = 10;
+    public const MAX_MULT_TABLES = 10;
+
+    /** Bornes d'une plage d'additions : 1 à 99. */
+    public const ADD_RANGE_MIN = 1;
+    public const ADD_RANGE_MAX = 99;
+
+    /**
+     * Valide la description des tables utilisées d'une partie (v12.8.1-B3).
+     *
+     * Deux formes acceptées, selon le mode de jeu :
+     *  - multiplication : tableau d'entiers uniques entre 1 et 10 (par ex. [1,2,5]) ;
+     *  - addition : objet {"min":int, "max":int} avec 1 <= min <= max <= 99.
+     *
+     * `null` est accepté uniquement comme « information non renseignée » (l'absence
+     * est décidée par l'appelant). Toute autre valeur (chaîne arbitraire, booléen,
+     * valeurs hors bornes, tableau mixte, doublons, tableau associatif) est rejetée.
+     *
+     * @param mixed  $value valeur brute transmise (jamais pré-castée).
+     * @param string $mode  'multiplication' | 'addition'.
+     * @return true si la valeur est une description de tables valide.
+     */
+    public static function tables(mixed $value, string $mode): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+        if ($mode === 'addition') {
+            if (!is_array($value) || !array_key_exists('min', $value) || !array_key_exists('max', $value)) {
+                return false;
+            }
+            $min = $value['min'];
+            $max = $value['max'];
+            return is_int($min) && is_int($max)
+                && $min >= self::ADD_RANGE_MIN && $max <= self::ADD_RANGE_MAX
+                && $min <= $max;
+        }
+        // multiplication : tableau d'entiers uniques dans [1,10].
+        if (!is_array($value)) {
+            return false;
+        }
+        $seen = [];
+        foreach ($value as $n) {
+            if (!is_int($n) || $n < self::MULT_TABLE_MIN || $n > self::MULT_TABLE_MAX) {
+                return false;
+            }
+            $seen[$n] = true;
+        }
+        // Clés strictement séquentielles (0..n-1) : un tableau associatif est rejeté.
+        return count($seen) <= self::MAX_MULT_TABLES
+            && array_keys($value) === range(0, count($value) - 1);
+    }
+
+    /**
+     * Normalise une description de tables validée en chaîne JSON canonique stable.
+     *
+     * - multiplication : tableau trié et dédupliqué d'entiers (ex. `[1,2,5]`).
+     * - addition : objet {"min":..,"max":..} (ex. `{"min":1,"max":10}`).
+     * - null (information absente) : renvoie null — jamais de JSON d'absence.
+     *
+     * À n'appeler qu'après validation (comportement indéfini sinon).
+     *
+     * @return string|null chaîne JSON canonique, ou null si information absente.
+     */
+    public static function normalizeTables(mixed $value, string $mode): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($mode === 'addition') {
+            return json_encode([
+                'min' => (int)$value['min'],
+                'max' => (int)$value['max'],
+            ], JSON_THROW_ON_ERROR);
+        }
+        $numbers = [];
+        foreach ($value as $n) {
+            $numbers[(int)$n] = true;
+        }
+        $sorted = array_keys($numbers);
+        sort($sorted, SORT_NUMERIC);
+        return json_encode($sorted, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Décode une chaîne JSON de tables stockée en base en structure PHP publique.
+     *
+     * @return array<int,int>|array{min:int,max:int}|null tableau de tables (multiplication),
+     *                        objet plage (addition), ou null si information absente/corrompue.
+     */
+    public static function decodeTables(?string $json): array|null
+    {
+        if ($json === null || trim($json) === '') {
+            return null;
+        }
+        $decoded = json_decode($json, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
     /**
      * Valide une durée de partie en millisecondes (v12.8-B2).
      *

@@ -136,10 +136,13 @@ const GuestHistoryV12 = (() => {
   /**
    * Enregistre une partie terminée.
    * @param {{mode:string, score:number, playedAt?:string, questionType?:string,
-   *          missionId?:string, details?:Array<object>}} part
+   *          missionId?:string, details?:Array<object>, tables?:Array<number>|{min:number,max:number}}} part
    *        mode "mult"/"add". `missionId` et `details` (v12.4) sont facultatifs et
    *        utilisés UNIQUEMENT pour un compte connecté : ils alimentent la mémoire
-   *        des difficultés (idempotente). En mode invité, ils sont ignorés.
+   *        des difficultés (idempotente). `tables` (v12.8.1-B3) décrit les tables
+   *        effectivement utilisées (tableau pour multiplications, {min,max} pour
+   *        additions) : champ optionnel, transmis au serveur uniquement en mode
+   *        connecté. En mode invité, ils sont ignorés.
    * @return {Promise<object>} {server:false, entry} (invite) / {server:true, ok} (connecte).
    */
   async function record(part) {
@@ -163,6 +166,12 @@ const GuestHistoryV12 = (() => {
       // rétrocompatibilité avec d'éventuels clients plus anciens.
       if (Number.isInteger(part.durationMs) && part.durationMs > 0) {
         payload.duration_ms = part.durationMs;
+      }
+      // v12.8.1-B3 : tables effectivement utilisées pendant la partie
+      // (multiplication : tableau d'entiers ; addition : objet {min,max}).
+      // Champ optionnel : les anciens clients ne l'envoient pas -> non renseignées.
+      if (part.tables !== undefined && part.tables !== null) {
+        payload.tables = part.tables;
       }
       // v12.4 : détail individuel des réponses + mission_id stable => mémoire
       // des difficultés personnelles côté serveur (atomique et idempotente).
