@@ -158,7 +158,7 @@ FILES.forEach(function (locale) {
     check("t: simple (fr)", I18N.t("home.start") === "Lancer une mission", I18N.t("home.start"));
     I18N._setLocaleSync("en");
     check("t: simple (en)", I18N.t("home.start") === "Start a mission", I18N.t("home.start"));
-    check("t: simple (en title)", I18N.t("home.title") === "Multiplication Mission", I18N.t("home.title"));
+    check("t: simple (en title)", I18N.t("home.title") === "Calculation Trainer", I18N.t("home.title"));
     I18N._setLocaleSync("es");
     check("t: simple (es)", I18N.t("home.start") === "Iniciar una misión", I18N.t("home.start"));
     I18N._setLocaleSync("zh-Hans");

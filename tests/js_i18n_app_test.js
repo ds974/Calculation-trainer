@@ -265,6 +265,83 @@ if (fu && fu.correction && I18N) {
   check("mode MULT en ZH reste en chinois (dimension mode indépendante)",
     zhMult.length > 0, "« " + zhMult + " »");
 
+  // --- 9b. B2 (v12.8.1) : titre général d'accueil FIXE et multilingue.
+  // Le nom général de l'application ne dépend PLUS de l'opération choisie ;
+  // il ne dépend que de la langue active. On vérifie les QUATRE titres exacts,
+  // que le titre visible et le titre d'onglet (doc.title) les utilisent, que
+  // le mode (add/mult) et les changements de préférences ne le réécrivent pas.
+  var fixedTitles = {
+    "fr": "Coach Calcul",
+    "en": "Calculation Trainer",
+    "es": "Entrenador de Cálculo",
+    "zh-Hans": "计算训练"
+  };
+  FILES.forEach(function (l) {
+    check("titre général HOME (home.title) en « " + l + " » exact",
+      flatCatalogs[l]["home.title"] === fixedTitles[l],
+      "« " + flatCatalogs[l]["home.title"] + " »");
+    check("titre d'onglet (doc.title) en « " + l + " » exact = home.title",
+      flatCatalogs[l]["doc.title"] === fixedTitles[l],
+      "« " + flatCatalogs[l]["doc.title"] + " »");
+  });
+  // Comportement : updateHomeTitle rend le MÊME titre en mult et en add.
+  var savedMode = fu.state.config.mode;
+  var subtitleMultHome, titleMultHome;
+  fu.state.config.mode = "mult";
+  fu.updateHomeTitle();
+  titleMultHome = homeTitleEl.textContent;
+  subtitleMultHome = homeSubtitleEl.textContent;
+  var titleAddHome;
+  fu.state.config.mode = "add";
+  fu.updateHomeTitle();
+  titleAddHome = homeTitleEl.textContent;
+  check("accueil : le titre est IDENTIQUE en multiplications et additions",
+    titleMultHome === titleAddHome && titleMultHome.length > 0,
+    "« " + titleMultHome + " » vs « " + titleAddHome + " »");
+  check("accueil : la description (sous-titre) reste DYNAMIQUE selon le mode",
+    subtitleMultHome !== homeSubtitleEl.textContent && homeSubtitleEl.textContent.length > 0,
+    "mult:« " + subtitleMultHome + " » add:« " + homeSubtitleEl.textContent + " »");
+  // Changement de préférences (mode) → le titre n'est pas réécrit différemment.
+  check("accueil : un changement de préférences (mode) ne change pas le titre général",
+    homeTitleEl.textContent === titleMultHome, "« " + homeTitleEl.textContent + " »");
+  // Retour à l'accueil / ré-affichage → le titre reste le nom général.
+  I18N._setLocaleSync("fr");
+  fu.state.config.mode = "mult";
+  fu.updateHomeTitle();
+  check("accueil : retour/ré-affichage conserve le titre général fixe",
+    homeTitleEl.textContent === fixedTitles["fr"],
+    "« " + homeTitleEl.textContent + " »");
+  // Changement de langue → le titre est actualisé immédiatement (sans reload).
+  fu.updateHomeTitle(); // s'assure que le titre courant est bien celui de la langue
+  FILES.forEach(function (l) {
+    I18N._setLocaleSync(l);
+    fu.updateHomeTitle();
+    check("accueil : changement de langue en « " + l + " » actualise le titre",
+      homeTitleEl.textContent === fixedTitles[l],
+      "« " + homeTitleEl.textContent + " »");
+  });
+  I18N._setLocaleSync("fr");
+  fu.state.config.mode = savedMode;
+  // Les sous-titres de mission (spécifiques au mode) restent DYNAMIQUES : ils
+  // diffèrent entre add et mult dans chaque langue (clés distinctes conservées).
+  FILES.forEach(function (l) {
+    check("mission : sous-titres add/mult distincts et conservés (« " + l + " »)",
+      flatCatalogs[l]["home.subtitleAddition"] !== flatCatalogs[l]["home.subtitleMultiplication"]
+        && flatCatalogs[l]["home.subtitleAddition"].length > 0
+        && flatCatalogs[l]["home.subtitleMultiplication"].length > 0,
+      "add:« " + flatCatalogs[l]["home.subtitleAddition"] + " » mult:« " + flatCatalogs[l]["home.subtitleMultiplication"] + " »");
+  });
+  // Le titre général n'est plus construit à partir du libellé du mode (ni dans
+  // le moteur i18n, ni dans le repli) : le repli utilise un nom fixe français.
+  check("accueil : le repli sans i18n n'utilise PLUS le libellé du mode pour le titre",
+    appSrc.indexOf('title.textContent = "Coach Calcul"') !== -1 &&
+    appSrc.indexOf("`Mission ${modeLabel()`") === -1, "");
+  // L'historique interne ne réécrit pas le titre avec une ancienne valeur au
+  // retour sur l'accueil : updateHomeTitle s'appuie sur home.title (clé unique,
+  // indépendante du mode) pour le <h1> de l'accueil.
+  check("accueil : updateHomeTitle utilise une clé UNIQUE home.title pour le titre",
+    appSrc.indexOf('title.textContent = I.t("home.title")') !== -1, "");
+
   // --- 5. Questions et corrections pédagogiques (toutes langues).
   function reveal(locale, v) {
     var label = I18N.t("feedback.answerReveal", null);

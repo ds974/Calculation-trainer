@@ -1,11 +1,11 @@
 {
   "doc": {
-    "title": "乘法闯关",
+    "title": "计算训练",
     "lang": "zh-Hans"
   },
   "home": {
     "eyebrow": "心算",
-    "title": "乘法闯关",
+    "title": "计算训练",
     "subtitleDefault": "10 道算术题、一个计时器，还有一枚等待组装的火箭。",
     "subtitleMultiplication": "10 道算术题、一个计时器，还有一枚等待组装的火箭。",
     "subtitleAddition": "10 道加法题、一个计时器，还有一枚等待组装的火箭。",

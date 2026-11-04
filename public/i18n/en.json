@@ -1,11 +1,11 @@
 {
   "doc": {
-    "title": "Multiplication Mission",
+    "title": "Calculation Trainer",
     "lang": "en"
   },
   "home": {
     "eyebrow": "Mental arithmetic",
-    "title": "Multiplication Mission",
+    "title": "Calculation Trainer",
     "subtitleDefault": "10 problems, a timer, and a rocket to build.",
     "subtitleMultiplication": "10 problems, a timer, and a rocket to build.",
     "subtitleAddition": "10 addition problems, a timer, and a rocket to build.",

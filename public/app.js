@@ -568,7 +568,9 @@ function updateHomeTitle() {
       subtitle.textContent = I.t(mode === "add" ? "home.subtitleAddition" : "home.subtitleMultiplication");
     }
   } else {
-    if (title) title.textContent = `Mission ${modeLabel()}`;
+    // Repli français : le NOM GÉNÉRAL de l'application est fixe (il ne dépend
+    // jamais de l'opération choisie), seule la description varie selon le mode.
+    if (title) title.textContent = "Coach Calcul";
     if (subtitle) {
       subtitle.textContent = mode === "add"
         ? "10 additions, un chrono et une fusée à construire."
