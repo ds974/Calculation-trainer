@@ -220,6 +220,13 @@ conservée aux côtés des scores locaux existants, ainsi qu'une correction des 
 générés par l'API qui corrige aussi le filtrage de difficulté de l'entraînement adaptatif — le
 tout avec des migrations SQLite entièrement compatibles avec les données existantes.
 
+**v12.8.1** est une version de correction bug au-dessus de la v12.8.0. Elle rétablit le choix des
+niveaux scolaires à l'inscription, fixe le titre de l'écran d'accueil pour qu'il soit constant et
+traduit dans les quatre langues, et fait afficher dans les classements partagés les tables
+d'opérations effectivement utilisées pour obtenir chaque score. Les anciens résultats dont les
+tables sont inconnues restent valides et sont affichés comme **Non renseignées** ; aucun score,
+aucune règle de classement ni aucune donnée historique n'est modifié.
+
 ---
 
 ## Licence et mention d'auteur

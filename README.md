@@ -257,6 +257,12 @@ alongside the existing local scores, and a fix to the generated GET API paramete
 corrects the adaptive-training difficulty filtering — together with fully compatible SQLite
 migrations for existing data.
 
+**v12.8.1** is a bug-fix release on top of v12.8.0. It restores the school-level choices at
+registration, fixes the home-screen title so it is constant and translated in the four languages,
+and makes shared leaderboards display the operation tables actually used to obtain each score.
+Old results whose tables are unknown remain valid and are shown as **Not specified**; no score,
+ranking rule or historical data is changed.
+
 ---
 
 ## License and attribution
